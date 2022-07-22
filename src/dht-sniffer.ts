@@ -27,6 +27,7 @@ class DHTSniffer extends EventEmitter {
         }
         this.dht = new DHT();
         this.rpc = this.dht._rpc;
+        this.latest_message_time = new Date();
         this.dht.listen(this._options.port, () => {
             console.log(`DHT init: now listening:${_this._options.port}`)
         })
@@ -46,7 +47,7 @@ class DHTSniffer extends EventEmitter {
          */
         this.refresh_interval_id = setInterval(() => {
             const nodes = this.dht.toJSON().nodes;
-            if (new Date().getTime() - this.latest_message_time.getTime() > this._options.refreshTime) {
+            if (new Date().getTime() - _this.latest_message_time.getTime() > _this._options.refreshTime) {
                 if (nodes.length === 0) {
                     _this.dht._rpc.bootstrap.forEach((node) => _this.findNode(node, _this.rpc.id))
                 } else {
@@ -62,6 +63,14 @@ class DHTSniffer extends EventEmitter {
         }, this._options.refreshTime);
         this.status = true;
     }
+    stop(){
+        const _this = this;
+        this.dht.destory(()=>{
+            clearInterval(_this.refresh_interval_id);
+            _this.status = false;
+        });
+    }
+
     findNode(node, nid) {
         let id = nid !== undefined ? utils.getNeighborId(nid, this.dht.nodeId) : this.dht.nodeId;
         let message = {
