@@ -152,6 +152,7 @@ class DHTSniffer extends EventEmitter {
                 });
             });
     }
+    parseMetaData = metadataHelper.parseMetaData
 }
 
 export { DHTSniffer };

@@ -1,7 +1,8 @@
 const utils = require("./utils");
 const net = require('net');
 const ut_metadata = require('ut_metadata');
-const Protocol = require('bittorrent-protocol')
+const Protocol = require('bittorrent-protocol');
+const bencode = require("bencode");
 
 export function fetch(target, config) {
     return new Promise((resolve, reject) => {
@@ -52,4 +53,14 @@ export function fetch(target, config) {
             //ignore
         });
     });
+}
+
+
+export function parseMetaData(metadata) {
+    try {
+        let data = bencode.decode(metadata);
+        console.log(data);
+    } catch (e) {
+        console.error(e);
+    }
 }
