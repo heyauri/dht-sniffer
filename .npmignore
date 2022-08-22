@@ -4,6 +4,6 @@ scripts
 .gitignore
 pnpm-lock.yaml
 src
-.prettieerc
 tsconfig.json
 tors
+.prettierrc
