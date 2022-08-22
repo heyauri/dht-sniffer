@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target":"ES2015",
+    "allowJs": true,
+    "noImplicitAny": false,
+    "removeComments": true,
+    "preserveConstEnums": true,
+    "sourceMap": false,
+    "allowSyntheticDefaultImports": true,
+    "outDir": "lib",
+    "rootDir": "src",
+    "lib": [
+      "dom",
+      "es5",
+      "scripthost",
+      "ES2015"
+    ],
+    "module":"CommonJS",
+    "moduleResolution": "node"
+  },
+  "include": ["src"],
+  "exclude": ["lib","scripts"]
+}

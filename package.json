@@ -1,0 +1,45 @@
+{
+    "name": "dht-sniffer",
+    "version": "0.1.0",
+    "description": "A dht sniffer based on node.js",
+    "main": "index.js",
+    "scripts": {
+        "test": "tsc & node scripts/test.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/heyauri/dht-sniffer.git"
+    },
+    "keywords": [
+        "dht",
+        "torrents"
+    ],
+    "author": "heyauri",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/heyauri/dht-sniffer/issues"
+    },
+    "homepage": "https://github.com/heyauri/dht-sniffer#readme",
+    "devDependencies": {
+        "@types/node": "^18.7.3"
+    },
+    "dependencies": {
+        "bencode": "^2.0.3",
+        "bitfield": "^4.1.0",
+        "bittorrent-protocol": "^3.5.5",
+        "debug": "^4.3.4",
+        "events": "^3.3.0",
+        "k-bucket": "^5.1.0",
+        "k-rpc": "^5.1.0",
+        "last-one-wins": "^1.0.4",
+        "lru": "^3.1.0",
+        "randombytes": "^2.1.0",
+        "record-cache": "^1.2.0",
+        "simple-sha1": "^3.1.0",
+        "ut_metadata": "^3.5.2",
+        "rc4": "^0.1.5",
+        "readable-stream": "^3.6.0",
+        "throughput": "^1.0.1",
+        "unordered-array-remove": "^1.0.2"
+    }
+}
