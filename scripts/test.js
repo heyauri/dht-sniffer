@@ -4,9 +4,9 @@ const path = require("path");
 
 let sniffer = new DHTSniffer({ port: 6881, refreshTime: 30000,downloadMaxTime:30000 });
 sniffer.start();
-sniffer.on('infoHash', data => {
-    // console.log('get infoHash:', data, data["infoHash"].toString("hex"));
-    sniffer.fetchMetaData(data['infoHash'], data['peer']);
+sniffer.on('infoHash', (infoHash,peer) => {
+    console.log('get infoHash:', infoHash,peer);
+    // sniffer.fetchMetaData(infoHash, peer);
 });
 sniffer.on('node', node => {
     // console.log('find node', node);

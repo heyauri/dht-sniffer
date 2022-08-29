@@ -49,7 +49,7 @@ class DHTSniffer extends EventEmitter {
          *  emit data like {infoHash, peer: { address: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
          */
         this.dht.on('get_peers', data => {
-            _this.emit('infoHash', data);
+            _this.emit('infoHash', data["infoHash"], data["peer"]);
         });
 
         this.dht.on('node', function (node) {
@@ -141,10 +141,10 @@ class DHTSniffer extends EventEmitter {
                 this._options
             )
             .then(metadata => {
-                _this.emit('metadata', {
+                _this.emit('metadata',
                     infoHash,
                     metadata
-                });
+                );
             }).catch(error => {
                 _this.emit('metadataError', {
                     infoHash,

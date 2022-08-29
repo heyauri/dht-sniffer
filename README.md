@@ -1,9 +1,9 @@
 # dht-sniffer
 
 ## Introduction
-A nodejs based dht-sniffer, including a metadata(torrent) fetching module.
+A nodejs based dht-sniffer, including a metadata(torrent) module that can be used to fetch and parse matadata.
 
-## Usage
+## Simple Usage
 ```nodejs
 const { DHTSniffer } = require('../lib/dht-sniffer');
 const fs = require("fs");
@@ -40,3 +40,30 @@ sniffer.on("metadataError", data => {
 })
 
 ```
+## API
+
+### `sniffer.start()`
+Starting to sniffe infoHash from the DHT network, should be called after the initialization of the service.
+
+### `sniffer.stop()`
+Stop the sniffe service and destroy the inner DHT instance.
+
+### `sniffer.fetchMetaData(target)`
+Fetch the target metadata from the target peer.
+```nodejs
+sniffer.fetchMetaData({
+    infoHash:Buffer,
+    peer:{
+        address: a string of target ip address,
+        port: a string of target port number
+    }
+})
+```
+
+## Events
+
+### `dht.on('infoHash',function(infoHash,peer){ ... })`
+Emitted when the "get_peers" message is received, the message consists of an infoHash Buffer data and the remote peer which sent the "get_peers" message, be like { address, port }.
+
+### `dht.on('metadata',function(infoHash,metadata){ ... })`
+Emitted when the service fetched target metadata successfully.

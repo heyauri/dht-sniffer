@@ -3,6 +3,7 @@ const net = require('net');
 const ut_metadata = require('ut_metadata');
 const Protocol = require('bittorrent-protocol');
 const bencode = require("bencode");
+const crypto = require('crypto');
 
 export function fetch(target, config) {
     return new Promise((resolve, reject) => {
@@ -56,11 +57,50 @@ export function fetch(target, config) {
 }
 
 
-export function parseMetaData(metadata) {
-    try {
-        let data = bencode.decode(metadata);
-        console.log(data);
-    } catch (e) {
-        console.error(e);
+export function parseMetaData(rawMetadata) {
+    let metadata = bencode.decode(rawMetadata);
+    // metadata from bittorrent-protocol pkg is slightly different from the original
+    let infoHash = crypto.createHash('sha1').update(bencode.encode(metadata["info"])).digest();
+    let torrentType = "single";
+    let filePaths = [];
+    let size = 0;
+    if (Object.prototype.toString.call(metadata.info.files) === "[object Array]") {
+        torrentType = "multiple";
+        let arr = [];
+        for (let item of metadata.info.files) {
+            try {
+                if (item['path']) {
+                    let str = item['path'].toString();
+                    if (str !== '') {
+                        arr.push(str);
+                    }
+                }
+                if (item['length']) {
+                    size += item['length'];
+                }
+            } catch (e) {
+            }
+        }
+        filePaths = arr;
     }
+    else if (metadata.info.files) {
+        if (metadata.info.files['path']) {
+            filePaths = metadata.info.files['path'].toString();
+        }
+    }
+    else if (!metadata.info.files && metadata.info["length"]) {
+        size = metadata.info.length;
+        filePaths.push(metadata.info.name.toString());
+    }
+
+    filePaths = JSON.stringify(filePaths);
+    return {
+        infoHash,
+        name: metadata.info.name.toString(),
+        size: size,
+        torrentType: torrentType,
+        filePaths: filePaths,
+        info: metadata.info,
+        rawMetadata
+    };
 }
