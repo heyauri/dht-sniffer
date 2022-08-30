@@ -8,7 +8,7 @@ const debug = require('debug')('bittorrent-dht');
 import * as KBucket from 'k-bucket';
 import * as krpc from 'k-rpc';
 import * as low from 'last-one-wins';
-import * as LRU from 'lru';
+import * as LRU from 'lru-cache';
 import * as randombytes from 'randombytes';
 import * as records from 'record-cache';
 import * as simpleSha1 from 'simple-sha1';
@@ -21,8 +21,8 @@ export class DHT extends EventEmitter {
     constructor(opts = {}) {
         super();
 
-        this._tables = new LRU({ maxAge: ROTATE_INTERVAL, max: opts.maxTables || 1000 });
-        this._values = new LRU(opts.maxValues || 1000);
+        this._tables = new LRU({ ttl: ROTATE_INTERVAL, max: opts.maxTables || 1000 });
+        this._values = new LRU({ max: opts.maxValues || 1000 });
         this._peers = records({
             maxAge: opts.maxAge || 0,
             maxSize: opts.maxPeers || 10000
@@ -241,8 +241,8 @@ export class DHT extends EventEmitter {
     toJSON() {
         const self = this;
         const values = {};
-        Object.keys(this._values.cache).forEach(key => {
-            const value = self._values.cache[key].value;
+        Object.keys(this._values.keyMap).forEach(key => {
+            const value = self._values.keyMap[key].value;
             values[key] = {
                 v: value.v.toString('hex'),
                 id: value.id.toString('hex')
@@ -744,7 +744,7 @@ export class DHT extends EventEmitter {
     }
 }
 
-function noop() {}
+function noop() { }
 
 function sha1(buf) {
     return Buffer.from(simpleSha1.sync(buf), 'hex');

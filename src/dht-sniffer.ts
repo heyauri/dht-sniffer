@@ -4,6 +4,7 @@ import * as metadataHelper from './metadata-helper';
 
 import { EventEmitter } from 'events';
 import * as utils from './utils';
+import * as LRU from "lru-cache";
 
 class DHTSniffer extends EventEmitter {
     private _options: any;
@@ -14,22 +15,25 @@ class DHTSniffer extends EventEmitter {
     status: boolean;
     metadataWaitingQueues: Array<any>;
     metadataFetchingDict: any;
-
+    fetchdCache: any;
     constructor(options) {
         super();
         this._options = Object.assign(
             {
                 port: 6881,
                 refreshTime: 1 * 60 * 1000,
-                maximumParallelFetchingTorrent: 10,
+                maximumParallelFetchingTorrent: 25,
+                maximumWaitingQueueSize: -1,
                 downloadMaxTime: 30000,
                 aggressive: false,
+                ignoreFetched: false,
             },
             options
         );
         this.status = false;
         this.metadataWaitingQueues = [];
         this.metadataFetchingDict = {};
+        this.fetchdCache = new LRU({ max: 10000, ttl: 6 * 60 * 60 * 1000 })
     }
 
     start() {
@@ -130,15 +134,37 @@ class DHTSniffer extends EventEmitter {
      * dht module. If it is ignored, the sniffer will try to look up some peer.
      */
     fetchMetaData(infoHash: Buffer, peer: any) {
-        const _this = this;
-        _this.metadataWaitingQueues.push(infoHash);
+        this.metadataWaitingQueues.unshift({ infoHash, peer });
+        if (this._options.maximumWaitingQueueSize > 0 && this.metadataWaitingQueues.length > this._options.maximumWaitingQueueSize) {
+            this.metadataWaitingQueues.pop();
+        }
+        this.dispatchMetadata();
         // _this.dht.lookup(infoHash);
+    }
+    dispatchMetadata() {
+        let _this = this;
+        let fetchings = Object.keys(this.metadataFetchingDict);
+        console.log(fetchings.length, this.metadataWaitingQueues.length);
+        if (fetchings.length > this._options.maximumParallelFetchingTorrent) {
+            return;
+        }
+        let nextFetching = this.metadataWaitingQueues.pop();
+        if (!nextFetching) return;
+        let nextFetchingKey = JSON.stringify(nextFetching);
+        if (this._options["ignoreFetched"] && this.fetchdCache.get(nextFetchingKey)) {
+            return;
+        }
+        let {
+            infoHash,
+            peer
+        } = nextFetching;
+        this.metadataFetchingDict[nextFetchingKey] = 1;
+        this.fetchdCache.set(nextFetchingKey, 1);
         metadataHelper
-            .fetch(
-                {
-                    infoHash,
-                    peer
-                },
+            .fetch({
+                infoHash,
+                peer
+            },
                 this._options
             )
             .then(metadata => {
@@ -151,6 +177,9 @@ class DHTSniffer extends EventEmitter {
                     infoHash,
                     error
                 });
+            }).finally(() => {
+                _this.dispatchMetadata();
+                Reflect.deleteProperty(_this.metadataFetchingDict, nextFetchingKey);
             });
     }
     parseMetaData = metadataHelper.parseMetaData

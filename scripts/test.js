@@ -2,7 +2,7 @@ const { DHTSniffer } = require('../lib/dht-sniffer');
 const fs = require("fs");
 const path = require("path");
 
-let sniffer = new DHTSniffer({ port: 6881, refreshTime: 30000, downloadMaxTime: 30000 ,aggressive: true });
+let sniffer = new DHTSniffer({ port: 6881, maximumWaitingQueueSize: 300, refreshTime: 30000, downloadMaxTime: 30000, aggressive: true });
 sniffer.start();
 sniffer.on('infoHash', (infoHash, peer) => {
     console.log('get infoHash:', infoHash, peer);
