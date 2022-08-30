@@ -93,13 +93,12 @@ export function parseMetaData(rawMetadata) {
         filePaths.push(metadata.info.name.toString());
     }
 
-    filePaths = JSON.stringify(filePaths);
     return {
         infoHash,
         name: metadata.info.name.toString(),
-        size: size,
-        torrentType: torrentType,
-        filePaths: filePaths,
+        size,
+        torrentType,
+        filePaths,
         info: metadata.info,
         rawMetadata
     };
