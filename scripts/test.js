@@ -6,7 +6,9 @@ let sniffer = new DHTSniffer({ port: 6881, refreshTime: 30000,downloadMaxTime:30
 sniffer.start();
 sniffer.on('infoHash', (infoHash,peer) => {
     console.log('get infoHash:', infoHash,peer);
-    // sniffer.fetchMetaData(infoHash, peer);
+    if(!fs.existsSync(path.join(__dirname,"../tors/",`${data["infoHash"].toString("hex")}.torrent`),data["metadata"])){
+        sniffer.fetchMetaData(infoHash, peer);
+    }
 });
 sniffer.on('node', node => {
     // console.log('find node', node);
