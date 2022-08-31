@@ -33,7 +33,7 @@ class DHTSniffer extends EventEmitter {
         this.status = false;
         this.metadataWaitingQueues = [];
         this.metadataFetchingDict = {};
-        this.fetchdCache = new LRU({ max: 10000, ttl: 6 * 60 * 60 * 1000 })
+        this.fetchdCache = new LRU({ max: 10000, ttl: 60 * 60 * 1000 })
     }
 
     start() {
@@ -168,6 +168,7 @@ class DHTSniffer extends EventEmitter {
                 this._options
             )
             .then(metadata => {
+                if (metadata === undefined) return;
                 _this.emit('metadata',
                     infoHash,
                     metadata

@@ -50,8 +50,13 @@ export function fetch(target, config) {
             reject({ type: "timeout", err });
         });
 
-        socket.once('close', function () {
+        socket.once('close', function (hadError) {
             //ignore
+            if (hadError) {
+                reject({ type: "socketError", hadError });
+            }else{
+                resolve();
+            }
         });
     });
 }
