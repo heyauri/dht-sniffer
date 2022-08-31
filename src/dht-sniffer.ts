@@ -79,7 +79,7 @@ class DHTSniffer extends EventEmitter {
                     });
                 }
             }
-            if (nodes === 0) {
+            if (nodes.length === 0) {
                 _this.dht.bootstrap();
             }
             console.log('nodes:', nodes.length);
@@ -149,14 +149,15 @@ class DHTSniffer extends EventEmitter {
         }
         let nextFetching = this.metadataWaitingQueues.pop();
         if (!nextFetching) return;
-        let nextFetchingKey = JSON.stringify(nextFetching);
-        if (this._options["ignoreFetched"] && this.fetchdCache.get(nextFetchingKey)) {
-            return;
-        }
         let {
             infoHash,
             peer
         } = nextFetching;
+        let nextFetchingKey = this.getNextFetchingKey(nextFetching);
+        // console.log(nextFetchingKey);
+        if (this._options["ignoreFetched"] && this.fetchdCache.get(nextFetchingKey)) {
+            return;
+        }
         this.metadataFetchingDict[nextFetchingKey] = 1;
         this.fetchdCache.set(nextFetchingKey, 1);
         metadataHelper
@@ -186,6 +187,13 @@ class DHTSniffer extends EventEmitter {
     getSizes() {
         let fetchings = Object.keys(this.metadataFetchingDict);
         console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size);
+    }
+    getNextFetchingKey(nextFetching) {
+        let {
+            infoHash,
+            peer
+        } = nextFetching;
+        return JSON.stringify([peer["address"], peer["port"], infoHash.toString("hex")]);
     }
 }
 
