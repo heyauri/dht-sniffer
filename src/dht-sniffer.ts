@@ -144,7 +144,6 @@ class DHTSniffer extends EventEmitter {
     dispatchMetadata() {
         let _this = this;
         let fetchings = Object.keys(this.metadataFetchingDict);
-        console.log(fetchings.length, this.metadataWaitingQueues.length);
         if (fetchings.length > this._options.maximumParallelFetchingTorrent) {
             return;
         }
@@ -184,6 +183,10 @@ class DHTSniffer extends EventEmitter {
             });
     }
     parseMetaData = metadataHelper.parseMetaData
+    getSizes() {
+        let fetchings = Object.keys(this.metadataFetchingDict);
+        console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size);
+    }
 }
 
 export { DHTSniffer };

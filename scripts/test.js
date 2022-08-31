@@ -8,6 +8,7 @@ sniffer.on('infoHash', (infoHash, peer) => {
     console.log('get infoHash:', infoHash, peer);
     if (!fs.existsSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`))) {
         sniffer.fetchMetaData(infoHash, peer);
+        sniffer.getSizes();
     }
 });
 sniffer.on('node', node => {
