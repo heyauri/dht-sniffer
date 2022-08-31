@@ -8,6 +8,7 @@ const debug = require('debug')('bittorrent-dht');
 import * as KBucket from 'k-bucket';
 import * as krpc from 'k-rpc';
 import * as low from 'last-one-wins';
+// import * as LRU from 'lru';
 import * as LRU from 'lru-cache';
 import * as randombytes from 'randombytes';
 import * as records from 'record-cache';
@@ -23,6 +24,8 @@ export class DHT extends EventEmitter {
 
         this._tables = new LRU({ ttl: ROTATE_INTERVAL, max: opts.maxTables || 1000 });
         this._values = new LRU({ max: opts.maxValues || 1000 });
+        // this._tables = new LRU({ maxAge: ROTATE_INTERVAL, max: opts.maxTables || 1000 });
+        // this._values = new LRU({ max: opts.maxValues || 1000 });
         this._peers = records({
             maxAge: opts.maxAge || 0,
             maxSize: opts.maxPeers || 10000
@@ -243,6 +246,8 @@ export class DHT extends EventEmitter {
         const values = {};
         Object.keys(this._values.keyMap).forEach(key => {
             const value = self._values.keyMap[key].value;
+        // Object.keys(this._values.cache).forEach(key => {
+        //     const value = self._values.cache[key].value;
             values[key] = {
                 v: value.v.toString('hex'),
                 id: value.id.toString('hex')
@@ -553,8 +558,8 @@ export class DHT extends EventEmitter {
         const host = peer.address || peer.host;
         const infoHash = query.a.info_hash;
         if (!infoHash) return this._rpc.error(peer, query, [203, '`get_peers` missing required `a.info_hash` field']);
-
-        this.emit('get_peers', { infoHash, peer });
+        // avoid memory leaks
+        this.emit('get_peers', { infoHash:Buffer.from(infoHash), peer: { address: host, port: peer.port } });
 
         const r = { id: this._rpc.id, token: this._generateToken(host) };
         const peers = this._peers.get(infoHash.toString('hex'));

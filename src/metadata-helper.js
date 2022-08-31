@@ -25,12 +25,14 @@ export function fetch(target, config) {
                 console.log("success", metadata);
                 resolve(metadata);
                 socket.end();
+                wire.destroy();
             })
 
             // optionally, listen to the 'warning' event if you want to know that metadata is
             // probably not going to arrive for one of the above reasons.
             wire.ut_metadata.on('warning', err => {
                 reject({ type: "metadataWarning", err });
+                wire.destroy();
             })
 
             // handle handshake

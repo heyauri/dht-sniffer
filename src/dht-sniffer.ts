@@ -66,18 +66,15 @@ class DHTSniffer extends EventEmitter {
          *  If no request is received within a configured time period, lookup some new nodes
          */
         this.refreshIntervalId = setInterval(() => {
-            const nodes = this.dht.toJSON().nodes;
+            let nodes = this.dht.toJSON().nodes;
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
-                if (nodes.length === 0) {
-                    _this.dht._rpc.bootstrap.forEach(node => _this.findNode(node, _this.rpc.id));
-                } else {
-                    nodes.map(node => {
-                        if (Math.random() > 0.5) {
-                            // console.log('try find nodes', node);
-                            _this.findNode(node, _this.rpc.id);
-                        }
-                    });
-                }
+                nodes.map(node => {
+                    if (Math.random() > 0.5) {
+                        // console.log('try find nodes', node);
+                        // _this.findNode(node, _this.rpc.id);
+                    }
+                });
+
             }
             if (nodes.length === 0) {
                 _this.dht.bootstrap();
@@ -186,7 +183,9 @@ class DHTSniffer extends EventEmitter {
     parseMetaData = metadataHelper.parseMetaData
     getSizes() {
         let fetchings = Object.keys(this.metadataFetchingDict);
-        console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size);
+        console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size,
+            this.dht._tables.size, this.dht._values.size,
+            this.dht._peers.size);
     }
     getNextFetchingKey(nextFetching) {
         let {
