@@ -1,7 +1,7 @@
 const { DHTSniffer } = require('../lib/dht-sniffer');
 const fs = require("fs");
 const path = require("path");
-const heapdump = require("heapdump");
+// const heapdump = require("heapdump");
 
 let sniffer = new DHTSniffer({ port: 6881, maximumWaitingQueueSize: 300, refreshTime: 30000, downloadMaxTime: 30000, aggressive: true });
 sniffer.start();
@@ -39,5 +39,5 @@ sniffer.on("metadataError", data => {
 })
 
 setInterval(() => {
-    heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
+    // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
 }, 10 * 60 * 1000)

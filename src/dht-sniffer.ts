@@ -16,6 +16,7 @@ class DHTSniffer extends EventEmitter {
     metadataWaitingQueues: Array<any>;
     metadataFetchingDict: any;
     fetchdCache: any;
+    findNodeCache: any;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -27,6 +28,7 @@ class DHTSniffer extends EventEmitter {
                 downloadMaxTime: 30000,
                 aggressive: false,
                 ignoreFetched: false,
+                concurrency: 16
             },
             options
         );
@@ -34,6 +36,7 @@ class DHTSniffer extends EventEmitter {
         this.metadataWaitingQueues = [];
         this.metadataFetchingDict = {};
         this.fetchdCache = new LRU({ max: 10000, ttl: 60 * 60 * 1000 })
+        this.findNodeCache = new LRU({ max: 40000, ttl: 60 * 60 * 1000, updateAgeOnHas: true })
     }
 
     start() {
@@ -42,7 +45,9 @@ class DHTSniffer extends EventEmitter {
             console.log('The sniffer is already working');
             return;
         }
-        this.dht = new DHT();
+        this.dht = new DHT({
+            concurrency: this._options.concurrency || 16
+        });
         this.rpc = this.dht._rpc;
         this.latestReceive = new Date();
         this.dht.listen(this._options.port, () => {
@@ -60,7 +65,11 @@ class DHTSniffer extends EventEmitter {
         this.dht.on('node', function (node) {
             _this.latestReceive = new Date();
             _this.emit('node', node);
-            _this.findNode(node, node.id);
+            let nodeKey = JSON.stringify([node["host"], node["port"]]);
+            if (!_this.findNodeCache.has(nodeKey) && Math.random() > Math.log10(_this.rpc.pending.length)) {
+                _this.findNode(node, node.id);
+                _this.findNodeCache.set(nodeKey, 1);
+            }
         });
         /**
          *  If no request is received within a configured time period, lookup some new nodes
@@ -69,15 +78,18 @@ class DHTSniffer extends EventEmitter {
             let nodes = this.dht.toJSON().nodes;
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
-                    if (Math.random() > 0.5) {
+                    if (Math.random() > Math.log10(_this.rpc.pending.length)) {
                         // console.log('try find nodes', node);
-                        // _this.findNode(node, _this.rpc.id);
+                        _this.findNode(node, _this.rpc.id);
                     }
                 });
 
             }
             if (nodes.length === 0) {
                 _this.dht.bootstrap();
+            }
+            if (_this.rpc.pending.length > 1000) {
+                _this.clearRPCPendingArray();
             }
             console.log('nodes:', nodes.length);
         }, this._options.refreshTime);
@@ -185,7 +197,11 @@ class DHTSniffer extends EventEmitter {
         let fetchings = Object.keys(this.metadataFetchingDict);
         console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size,
             this.dht._tables.size, this.dht._values.size,
-            this.dht._peers.size);
+            this.dht._peers.size, this.rpc.pending.length);
+    }
+    clearRPCPendingArray() {
+        let pending = this.rpc.pending.slice(0, 10000);
+        this.rpc.pending = pending;
     }
     getNextFetchingKey(nextFetching) {
         let {
