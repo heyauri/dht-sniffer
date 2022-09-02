@@ -1,6 +1,6 @@
 {
     "name": "dht-sniffer",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "description": "A dht sniffer based on node.js",
     "main": "lib/dht-sniffer.js",
     "scripts": {
