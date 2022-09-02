@@ -17,6 +17,7 @@ class DHTSniffer extends EventEmitter {
     metadataFetchingDict: any;
     fetchdCache: any;
     findNodeCache: any;
+    uselessPeers:any;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -28,15 +29,18 @@ class DHTSniffer extends EventEmitter {
                 downloadMaxTime: 30000,
                 aggressive: false,
                 ignoreFetched: false,
-                concurrency: 16
+                concurrency: 16,
+                fetchdCacheSize:40000,
+                findNodeCacheSize:40000
             },
             options
         );
         this.status = false;
         this.metadataWaitingQueues = [];
         this.metadataFetchingDict = {};
-        this.fetchdCache = new LRU({ max: 10000, ttl: 60 * 60 * 1000 })
-        this.findNodeCache = new LRU({ max: 40000, ttl: 60 * 60 * 1000, updateAgeOnHas: true })
+        this.fetchdCache = new LRU({ max: this._options.fetchdCacheSize, ttl: 60 * 60 * 1000 });
+        this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 60 * 60 * 1000, updateAgeOnHas: true });
+        this.uselessPeers = new LRU({ max: 1000, ttl: 60 * 60 * 1000 });
     }
 
     start() {
@@ -89,7 +93,7 @@ class DHTSniffer extends EventEmitter {
                 _this.dht.bootstrap();
             }
             if (_this.rpc.pending.length > 1000) {
-                _this.clearRPCPendingArray();
+                _this.reduceRPCPendingArray();
             }
             console.log('nodes:', nodes.length);
         }, this._options.refreshTime);
@@ -183,6 +187,8 @@ class DHTSniffer extends EventEmitter {
                     metadata
                 );
             }).catch(error => {
+                let peerKey = `${peer.address}+${peer.port}`;
+                _this.uselessPeers.set(peerKey, 1);
                 _this.emit('metadataError', {
                     infoHash,
                     error
@@ -199,8 +205,8 @@ class DHTSniffer extends EventEmitter {
             this.dht._tables.size, this.dht._values.size,
             this.dht._peers.size, this.rpc.pending.length);
     }
-    clearRPCPendingArray() {
-        let pending = this.rpc.pending.slice(0, 10000);
+    reduceRPCPendingArray() {
+        let pending = this.rpc.pending.slice(0, 1000);
         this.rpc.pending = pending;
     }
     getNextFetchingKey(nextFetching) {
