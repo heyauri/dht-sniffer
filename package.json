@@ -1,10 +1,11 @@
 {
     "name": "dht-sniffer",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "A dht sniffer based on node.js",
     "main": "lib/dht-sniffer.js",
     "scripts": {
-        "test": "tsc & node scripts/test.js"
+        "test": "tsc & node scripts/test.js",
+        "prd": "pm2 start scripts/test.js --name dht --max-memory-restart 1000M"
     },
     "repository": {
         "type": "git",

@@ -90,7 +90,7 @@ class DHTSniffer extends EventEmitter {
 
             }
             if (nodes.length === 0) {
-                _this.dht.bootstrap();
+                _this.dht._bootstrap(true);
             }
             if (_this.rpc.pending.length > 1000) {
                 _this.reduceRPCPendingArray();
