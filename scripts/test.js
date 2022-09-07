@@ -3,13 +3,13 @@ const fs = require("fs");
 const path = require("path");
 // const heapdump = require("heapdump");
 
-let sniffer = new DHTSniffer({ port: 6881, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 30000, aggressive: false, fetchdTupleSize: 100000,ignoreFetched: true });
+let sniffer = new DHTSniffer({ port: 6881, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 30000, aggressive: false, fetchdTupleSize: 100000, ignoreFetched: true });
 sniffer.start();
 sniffer.on('infoHash', (infoHash, peer) => {
     // console.log('get infoHash:', infoHash, peer);
     if (!fs.existsSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`))) {
         sniffer.fetchMetaData(infoHash, peer, true);
-        sniffer.getSizes();
+        console.log(Object.values(sniffer.getSizes()).join(" "));
     }
 });
 sniffer.on('node', node => {
