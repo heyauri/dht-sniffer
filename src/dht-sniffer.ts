@@ -5,6 +5,7 @@ import * as metadataHelper from './metadata-helper';
 import { EventEmitter } from 'events';
 import * as utils from './utils';
 import * as LRU from "lru-cache";
+import { buffer } from 'stream/consumers';
 
 class DHTSniffer extends EventEmitter {
     private _options: any;
@@ -15,30 +16,33 @@ class DHTSniffer extends EventEmitter {
     status: boolean;
     metadataWaitingQueues: Array<any>;
     metadataFetchingDict: any;
-    fetchdCache: any;
+    fetchdTuple: any;
     findNodeCache: any;
-    uselessPeers:any;
+    uselessPeers: any;
+    fetchdInfoHash: any;
     constructor(options) {
         super();
         this._options = Object.assign(
             {
                 port: 6881,
                 refreshTime: 1 * 60 * 1000,
-                maximumParallelFetchingTorrent: 25,
+                maximumParallelFetchingTorrent: 10,
                 maximumWaitingQueueSize: -1,
                 downloadMaxTime: 30000,
                 aggressive: false,
-                ignoreFetched: false,
+                ignoreFetched: true,
                 concurrency: 16,
-                fetchdCacheSize:40000,
-                findNodeCacheSize:40000
+                fetchdTupleSize: 40000,
+                fetchdInfoHashSize: 40000,
+                findNodeCacheSize: 40000
             },
             options
         );
         this.status = false;
         this.metadataWaitingQueues = [];
         this.metadataFetchingDict = {};
-        this.fetchdCache = new LRU({ max: this._options.fetchdCacheSize, ttl: 60 * 60 * 1000 });
+        this.fetchdTuple = new LRU({ max: this._options.fetchdTupleSize, ttl: 60 * 60 * 1000 });
+        this.fetchdInfoHash = new LRU({ max: this._options.fetchdTupleSize, ttl: 60 * 60 * 1000 });
         this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 60 * 60 * 1000, updateAgeOnHas: true });
         this.uselessPeers = new LRU({ max: 1000, ttl: 60 * 60 * 1000 });
     }
@@ -59,6 +63,7 @@ class DHTSniffer extends EventEmitter {
         });
         this.dht.on('warning', err => _this.emit('warning', err));
         this.dht.on('error', err => _this.emit('error', err));
+
         /**
          *  emit data like {infoHash, peer: { address: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
          */
@@ -75,6 +80,15 @@ class DHTSniffer extends EventEmitter {
                 _this.findNodeCache.set(nodeKey, 1);
             }
         });
+
+        /**
+         * Found potential peer of InfoHash.
+         */
+        this.dht.on('peer', function (peer, infoHash, from) {
+            // console.log('found potential peer ' + peer.host + ':' + peer.port + ' through ' + from.address + ':' + from.port, infoHash)
+            _this.addQueuingMetadata(infoHash, peer);
+        });
+
         /**
          *  If no request is received within a configured time period, lookup some new nodes
          */
@@ -143,21 +157,40 @@ class DHTSniffer extends EventEmitter {
     }
     /**
      * @param infoHash
-     * @param targetNode the origin node that is looking for the target infoHash, generally offered by the intergrated
-     * dht module. If it is ignored, the sniffer will try to look up some peer.
+     * @param targetNode the origin node that is looking for the target infoHash, generally offered by the intergrated dht module. If it is ignored, the sniffer will try to look up some peer.
+     * @param mode the mode of the fetching, true is stronger, false is weaker.
      */
-    fetchMetaData(infoHash: Buffer, peer: any) {
+    fetchMetaData(infoHash: Buffer, peer: any, mode: boolean = false) {
+        const _this = this;
+        if (mode === false) {
+            if (!peer || (peer.address === undefined || peer.port === undefined)) return false;
+        }
+        if (peer) {
+            this.addQueuingMetadata(infoHash, peer);
+        }
+        if (mode) {
+            // console.log("try lookup", infoHash.toString("hex"));
+            this.dht.lookup(infoHash, function (err, totalNodes) {
+                if (err) {
+                    _this.emit("error", err);
+                }
+                else {
+                    // console.log("total nodes", totalNodes)
+                }
+            });
+        }
+    }
+    addQueuingMetadata(infoHash, peer) {
         this.metadataWaitingQueues.unshift({ infoHash, peer });
         if (this._options.maximumWaitingQueueSize > 0 && this.metadataWaitingQueues.length > this._options.maximumWaitingQueueSize) {
             this.metadataWaitingQueues.pop();
         }
         this.dispatchMetadata();
-        // _this.dht.lookup(infoHash);
     }
     dispatchMetadata() {
         let _this = this;
         let fetchings = Object.keys(this.metadataFetchingDict);
-        if (fetchings.length > this._options.maximumParallelFetchingTorrent) {
+        if (fetchings.length >= this._options.maximumParallelFetchingTorrent) {
             return;
         }
         let nextFetching = this.metadataWaitingQueues.pop();
@@ -166,13 +199,16 @@ class DHTSniffer extends EventEmitter {
             infoHash,
             peer
         } = nextFetching;
+        let infoHashStr = infoHash.toString("hex");
         let nextFetchingKey = this.getNextFetchingKey(nextFetching);
-        // console.log(nextFetchingKey);
-        if (this._options["ignoreFetched"] && this.fetchdCache.get(nextFetchingKey)) {
+        if (this._options["ignoreFetched"] && this.fetchdTuple.get(nextFetchingKey)) {
+            return;
+        }
+        if (this._options["ignoreFetched"] && this.fetchdInfoHash.get(infoHashStr)) {
             return;
         }
         this.metadataFetchingDict[nextFetchingKey] = 1;
-        this.fetchdCache.set(nextFetchingKey, 1);
+        this.fetchdTuple.set(nextFetchingKey, 1);
         metadataHelper
             .fetch({
                 infoHash,
@@ -186,6 +222,7 @@ class DHTSniffer extends EventEmitter {
                     infoHash,
                     metadata
                 );
+                _this.fetchdInfoHash.set(infoHashStr, 1);
             }).catch(error => {
                 let peerKey = `${peer.address}+${peer.port}`;
                 _this.uselessPeers.set(peerKey, 1);
@@ -201,9 +238,8 @@ class DHTSniffer extends EventEmitter {
     parseMetaData = metadataHelper.parseMetaData
     getSizes() {
         let fetchings = Object.keys(this.metadataFetchingDict);
-        console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdCache.keyMap.size,
-            this.dht._tables.size, this.dht._values.size,
-            this.dht._peers.size, this.rpc.pending.length);
+        console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdTuple.keyMap.size,
+            this.fetchdInfoHash.keyMap.size,this.rpc.pending.length);
     }
     reduceRPCPendingArray() {
         let pending = this.rpc.pending.slice(0, 1000);

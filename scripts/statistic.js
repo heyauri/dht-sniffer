@@ -22,7 +22,7 @@ for (let f of fs.readdirSync(baseDir)) {
 let st_arr = Object.keys(fn_dict).map(item=>{
     return [item,fn_dict[item]];
 }).sort((a,b)=>{
-    return a[0] < b[0] ? -1 : 1;
+    return b[1] - a[1];
 })
 
 console.log(st_arr);
