@@ -93,4 +93,10 @@ If the pending request exceeds this value, it will time out. Default value is 30
 Boolean value. If true, the service will look for other nodes very aggressive. Default value is false.
 
 ### ignoreFetched
-Boolean value. If true, the service will ignore fetched requests this are still kept in the fetched cache. Default value is false.
+Boolean value. If true, the service will ignore fetched requests this are still kept in the fetched cache. Default value is true.
+
+### concurrency
+The number of concurrent requests of the DHT service, mainly related to the `find_node` requests. Default value is 16, and it is enough under most circumstances.
+
+### fetchdTupleSize
+The size of the internal LRU cache `fetchdTupleSize` which will store the tuple like `{infoHash, peer}`. While the `ignoreFetched` option is set to `true` and the tuple is still kept in cache, the metadata fetching requests will be ignored.
