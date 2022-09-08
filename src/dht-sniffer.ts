@@ -96,7 +96,7 @@ class DHTSniffer extends EventEmitter {
          */
         this.refreshIntervalId = setInterval(() => {
             let nodes = this.dht.toJSON().nodes;
-            this.nodes = [...new Set([...this.nodes, ...nodes])];
+            this.nodes = nodes;
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
                     if (Math.random() > Math.log10(_this.rpc.pending.length)) {
