@@ -27,7 +27,7 @@ class DHTSniffer extends EventEmitter {
             {
                 port: 6881,
                 refreshTime: 1 * 60 * 1000,
-                maximumParallelFetchingTorrent: 10,
+                maximumParallelFetchingTorrent: 16,
                 maximumWaitingQueueSize: -1,
                 downloadMaxTime: 30000,
                 aggressive: false,
@@ -99,7 +99,7 @@ class DHTSniffer extends EventEmitter {
             this.nodes = nodes;
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
-                    if (Math.random() > Math.log10(_this.rpc.pending.length)) {
+                    if (_this.nodes.length < 400 && _this.metadataWaitingQueues.length < 1000 && Math.random() > Math.log10(_this.rpc.pending.length)) {
                         // console.log('try find nodes', node);
                         _this.findNode(node, _this.rpc.id);
                     }
@@ -112,6 +112,9 @@ class DHTSniffer extends EventEmitter {
             if (_this.rpc.pending.length > 1000) {
                 _this.reduceRPCPendingArray();
             }
+            if (_this.metadataWaitingQueues.length > 100) {
+                utils.shuffle(_this.metadataWaitingQueues);
+            }
             console.log('nodes:', nodes.length);
         }, this._options.refreshTime);
         this.status = true;
@@ -123,7 +126,6 @@ class DHTSniffer extends EventEmitter {
             _this.status = false;
         });
     }
-
     findNode(peer, nid) {
         const _this = this;
         let id = nid !== undefined ? utils.getNeighborId(nid, this.dht.nodeId) : this.dht.nodeId;
@@ -205,9 +207,13 @@ class DHTSniffer extends EventEmitter {
         let infoHashStr = infoHash.toString("hex");
         let nextFetchingKey = this.getNextFetchingKey(nextFetching);
         if (this._options["ignoreFetched"] && this.fetchdTuple.get(nextFetchingKey)) {
+            console.log("fetchdTuple ignore")
+            this.dispatchMetadata();
             return;
         }
         if (this._options["ignoreFetched"] && this.fetchdInfoHash.get(infoHashStr)) {
+            console.log("fetchdInfoHash ignore")
+            this.dispatchMetadata();
             return;
         }
         this.metadataFetchingDict[nextFetchingKey] = 1;
@@ -261,7 +267,7 @@ class DHTSniffer extends EventEmitter {
             infoHash,
             peer
         } = nextFetching;
-        return JSON.stringify([peer["address"], peer["port"], infoHash.toString("hex")]);
+        return `${peer["address"]}:${peer["port"]}-${infoHash.toString("hex")}`;
     }
 }
 

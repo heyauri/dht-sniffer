@@ -81,7 +81,7 @@ The port number of the DHTSniffer service. Default is 6881.
 If the sniffer have not received any message from the DHT network during a time period, if will sent the `find_node` message to other nodes. By default the refreshTime is set to 1 minute, i.e. 1*60*1000 ms.
 
 ### maximumParallelFetchingTorrent
-Because every metadata request will last for seconds, the service will fetch meatadata parallelly. This option is used to limit the number of the parallel requests. Default value is 25.
+Because every metadata request will last for seconds, the service will fetch meatadata parallelly. This option is used to limit the number of the parallel requests. Default value is 16.
 
 ### maximumWaitingQueueSize
 While there is more than 25 (or your setting value) metadata requests, the call of `sniffer.fetchMetaData` function will be put into a waiting queue. This option is to set the size of the waiting queue. Default value is -1 which means no limit.
