@@ -60,13 +60,27 @@ sniffer.fetchMetaData({
 })
 ```
 
+### `sniffer.parseMetaData(rawMetadata)`
+Parse the raw metadata to a object with the following properties:
+```js
+{
+        infoHash,// Buffer like infoHash
+        name, // the name of the metadata
+        size, // total size of the files
+        torrentType, // 'single' or 'multiple' files
+        filePaths, // a list of all files
+        info: metadata.info,
+        rawMetadata
+}
+```
+
 ## Events
 
 ### `dht.on('infoHash',function(infoHash,peer){ ... })`
 Emitted when the "get_peers" message is received, the message consists of an infoHash Buffer data and the remote peer which sent the "get_peers" message, be like { address, port }.
 
 ### `dht.on('metadata',function(infoHash,metadata){ ... })`
-Emitted when the service fetched target metadata successfully.
+Emitted when the service fetched target metadata successfully. The `metadata` argument is a buffer that can be saved as a torrent file directly. Besides the `metadata` argument can also be parsed into an object using the `parseMetaData` function.
 
 ### `dht.on('metadataError',function(err){ ... })`
 Emitted when the service encounter an error during the metadata fetching progress.

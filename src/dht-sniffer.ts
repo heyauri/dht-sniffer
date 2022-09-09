@@ -20,7 +20,7 @@ class DHTSniffer extends EventEmitter {
     findNodeCache: any;
     uselessPeers: any;
     fetchdInfoHash: any;
-    nodes: Array<any>;
+    nodes: any;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -33,9 +33,9 @@ class DHTSniffer extends EventEmitter {
                 aggressive: false,
                 ignoreFetched: true,
                 concurrency: 16,
-                fetchdTupleSize: 40000,
-                fetchdInfoHashSize: 40000,
-                findNodeCacheSize: 40000
+                fetchdTupleSize: 4000,
+                fetchdInfoHashSize: 1000,
+                findNodeCacheSize: 4000
             },
             options
         );
@@ -43,9 +43,9 @@ class DHTSniffer extends EventEmitter {
         this.metadataWaitingQueues = [];
         this.nodes = [];
         this.metadataFetchingDict = {};
-        this.fetchdTuple = new LRU({ max: this._options.fetchdTupleSize, ttl: 60 * 60 * 1000 });
-        this.fetchdInfoHash = new LRU({ max: this._options.fetchdTupleSize, ttl: 60 * 60 * 1000 });
-        this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 60 * 60 * 1000, updateAgeOnHas: true });
+        this.fetchdTuple = new LRU({ max: this._options.fetchdTupleSize, ttl: 3 * 60 * 60 * 1000 });
+        this.fetchdInfoHash = new LRU({ max: this._options.fetchdInfoHashSize, ttl: 24 * 60 * 60 * 1000 });
+        this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
         this.uselessPeers = new LRU({ max: 1000, ttl: 60 * 60 * 1000 });
     }
 
@@ -95,8 +95,8 @@ class DHTSniffer extends EventEmitter {
          *  If no request is received within a configured time period, lookup some new nodes
          */
         this.refreshIntervalId = setInterval(() => {
-            let nodes = this.dht.toJSON().nodes;
-            this.nodes = nodes;
+            let nodes = this.dht._rpc.nodes;
+            this.nodes = nodes.toArray();
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
                     if (_this.nodes.length < 400 && _this.metadataWaitingQueues.length < 1000 && Math.random() > Math.log10(_this.rpc.pending.length)) {
@@ -115,7 +115,7 @@ class DHTSniffer extends EventEmitter {
             if (_this.metadataWaitingQueues.length > 100) {
                 utils.shuffle(_this.metadataWaitingQueues);
             }
-            console.log('nodes:', nodes.length);
+            console.log('nodes:', nodes.count());
         }, this._options.refreshTime);
         this.status = true;
     }
@@ -152,6 +152,7 @@ class DHTSniffer extends EventEmitter {
                 let nodes = utils.parseNodes(reply.r.nodes, 20);
                 for (let node of nodes) {
                     if (utils.isNodeId(node.id, 20)) {
+                        // console.log(node);
                         // _this.rpc.nodes.add(node);
                         _this.dht.addNode(node);
                     }
@@ -206,17 +207,24 @@ class DHTSniffer extends EventEmitter {
         } = nextFetching;
         let infoHashStr = infoHash.toString("hex");
         let nextFetchingKey = this.getNextFetchingKey(nextFetching);
+        /**
+         *  Fetch one unique infoHash at a same time
+         */
+        if (Reflect.has(this.metadataFetchingDict, infoHashStr)) {
+            this.metadataWaitingQueues.unshift(nextFetching);
+            return;
+        }
         if (this._options["ignoreFetched"] && this.fetchdTuple.get(nextFetchingKey)) {
-            console.log("fetchdTuple ignore")
+            // console.log("fetchdTuple ignore")
             this.dispatchMetadata();
             return;
         }
         if (this._options["ignoreFetched"] && this.fetchdInfoHash.get(infoHashStr)) {
-            console.log("fetchdInfoHash ignore")
+            // console.log("fetchdInfoHash ignore")
             this.dispatchMetadata();
             return;
         }
-        this.metadataFetchingDict[nextFetchingKey] = 1;
+        this.metadataFetchingDict[infoHashStr] = 1;
         this.fetchdTuple.set(nextFetchingKey, 1);
         metadataHelper
             .fetch({
@@ -241,7 +249,7 @@ class DHTSniffer extends EventEmitter {
                 });
             }).finally(() => {
                 _this.dispatchMetadata();
-                Reflect.deleteProperty(_this.metadataFetchingDict, nextFetchingKey);
+                Reflect.deleteProperty(_this.metadataFetchingDict, infoHashStr);
             });
     }
     parseMetaData = metadataHelper.parseMetaData

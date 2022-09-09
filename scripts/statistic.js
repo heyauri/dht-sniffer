@@ -12,7 +12,7 @@ for (let f of fs.readdirSync(baseDir)) {
     let buf = fs.readFileSync(fp);
     let metadata = sniffer.parseMetaData(buf);
     let fps = metadata.filePaths;
-    // console.log(typeof fps);
+    console.log(metadata.infoHash);
     for (let fn of fps) {
         fn in fn_dict ? fn_dict[fn] += 1 : fn_dict[fn] = 1;
     }
@@ -25,4 +25,4 @@ let st_arr = Object.keys(fn_dict).map(item=>{
     return b[1] - a[1];
 })
 
-console.log(st_arr);
+// console.log(st_arr);

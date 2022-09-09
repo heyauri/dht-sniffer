@@ -204,6 +204,7 @@ export class DHT extends EventEmitter {
         if (node.id) {
             node.id = toBuffer(node.id);
             const old = !!this._rpc.nodes.get(node.id);
+            // console.log(node);
             this._rpc.nodes.add(node);
             if (!old) {
                 this.emit('node', node);
