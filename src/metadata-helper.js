@@ -10,7 +10,7 @@ export function fetch(target, config) {
         // console.log('try fetching metadata', target);
         let peer = target.peer;
         let infoHash = target.infoHash;
-        const socket = net.createConnection(peer.port, peer.address)
+        const socket = net.createConnection(peer.port, peer.address || peer.host)
         socket.setTimeout(config.downloadMaxTime || 30000);
         socket.on('connect', () => {
             const wire = new Protocol()
@@ -56,7 +56,7 @@ export function fetch(target, config) {
             //ignore
             if (hadError) {
                 reject({ type: "socketError", hadError });
-            }else{
+            } else {
                 resolve();
             }
         });
