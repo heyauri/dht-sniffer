@@ -97,8 +97,8 @@ class DHTSniffer extends EventEmitter {
          *  If no request is received within a configured time period, lookup some new nodes
          */
         this.refreshIntervalId = setInterval(() => {
-            let nodes = this.dht._rpc.nodes;
-            this.nodes = nodes.toArray();
+            let nodes = this.dht._rpc.nodes.toArray();
+            this.nodes = nodes;
             utils.shuffle(this.nodes)
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
