@@ -560,7 +560,7 @@ export class DHT extends EventEmitter {
         const infoHash = query.a.info_hash;
         if (!infoHash) return this._rpc.error(peer, query, [203, '`get_peers` missing required `a.info_hash` field']);
         // avoid memory leaks
-        this.emit('get_peers', { infoHash:Buffer.from(infoHash), peer: { address: host, port: peer.port } });
+        this.emit('get_peers', { infoHash:Buffer.from(infoHash), peer: { host, port: peer.port } });
 
         const r = { id: this._rpc.id, token: this._generateToken(host) };
         const peers = this._peers.get(infoHash.toString('hex'));
