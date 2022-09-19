@@ -44,7 +44,7 @@ class DHTSniffer extends EventEmitter {
         this.nodes = [];
         this.metadataFetchingDict = {};
         this.fetchdTuple = new LRU({ max: this._options.fetchdTupleSize, ttl: 3 * 60 * 60 * 1000 });
-        this.fetchdInfoHash = new LRU({ max: this._options.fetchdInfoHashSize, ttl: 24 * 60 * 60 * 1000 });
+        this.fetchdInfoHash = new LRU({ max: this._options.fetchdInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
         this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
         this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
         this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
@@ -196,7 +196,9 @@ class DHTSniffer extends EventEmitter {
     }
     addQueuingMetadata(infoHash, peer, reverse = false) {
         let arr = this.metadataWaitingQueues;
-        reverse ? arr.unshift({ infoHash, peer }) : arr.push({ infoHash, peer });
+        let infoHashStr = infoHash.toString("hex");
+        let obj = { infoHash, peer, infoHashStr };
+        reverse ? arr.unshift(obj) : arr.push(obj);
         if (this._options.maximumWaitingQueueSize > 0 && arr.length > this._options.maximumWaitingQueueSize) {
             arr.shift();
         }
@@ -212,9 +214,9 @@ class DHTSniffer extends EventEmitter {
         if (!nextFetching) return;
         let {
             infoHash,
+            infoHashStr,
             peer
         } = nextFetching;
-        let infoHashStr = infoHash.toString("hex");
         let nextFetchingKey = this.getNextFetchingKey(nextFetching);
         /**
          *  Fetch one unique infoHash at a same time
@@ -255,6 +257,9 @@ class DHTSniffer extends EventEmitter {
                     metadata
                 );
                 _this.fetchdInfoHash.set(infoHashStr, 1);
+                if (_this._options["ignoreFetched"]) {
+                    _this.removeDuplicatedWaitingObjects(infoHashStr)
+                }
             }).catch(error => {
                 _this.emit('metadataError', {
                     infoHash,
@@ -266,6 +271,9 @@ class DHTSniffer extends EventEmitter {
             });
         // boost efficiency
         this.dispatchMetadata();
+    }
+    removeDuplicatedWaitingObjects(infoHashStr) {
+        this.metadataWaitingQueues = this.metadataWaitingQueues.filter(waitingObject => infoHashStr !== waitingObject["infoHashStr"]);
     }
     parseMetaData = metadataHelper.parseMetaData
     getSizes() {

@@ -5,7 +5,8 @@ const heapdump = require("heapdump");
 
 let sniffer = new DHTSniffer(
     {
-        port: 6881, maximumParallelFetchingTorrent: 25, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchdTupleSize: 100000, ignoreFetched: true, fetchdInfoHashSize: 100000, findNodeCacheSize: 100000
+        port: 6881, maximumParallelFetchingTorrent: 30
+        , maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 10000, aggressive: false, fetchdTupleSize: 100000, ignoreFetched: true, fetchdInfoHashSize: 100000, findNodeCacheSize: 100000
     });
 sniffer.start();
 sniffer.on('infoHash', (infoHash, peer) => {
@@ -42,6 +43,9 @@ sniffer.on("metadataError", data => {
 })
 
 setInterval(() => {
-    heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
     console.log(Object.values(sniffer.getSizes()).join(" "));
 }, 60 * 1000)
+
+setInterval(() => {
+    heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
+}, 600 * 1000)
