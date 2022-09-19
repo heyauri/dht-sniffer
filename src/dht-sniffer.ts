@@ -279,13 +279,17 @@ class DHTSniffer extends EventEmitter {
         this.dispatchMetadata();
     }
     boostMetadataFetching() {
+        let counter;
         while (true) {
             if (this.metadataWaitingQueues.length === 0) break;
             let fetchingLength = Object.keys(this.metadataFetchingDict).length;
             if (fetchingLength >= this._options.maximumParallelFetchingTorrent) break;
             let waitingKeysNumber = this.getUniqueWaitingKeys().length;
             if (waitingKeysNumber > fetchingLength) {
+                if (counter === undefined) counter = waitingKeysNumber;
                 this.dispatchMetadata();
+                counter--;
+                if (counter <= 0) break;
             } else {
                 break;
             }
