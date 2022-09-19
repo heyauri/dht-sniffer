@@ -120,7 +120,7 @@ class DHTSniffer extends EventEmitter {
             if (_this.metadataWaitingQueues.length > 100) {
                 utils.shuffle(_this.metadataWaitingQueues);
             }
-            // console.log('nodes:', nodes.count());
+            this.boostMetadataFetching();
         }, this._options.refreshTime);
         this.status = true;
     }
@@ -194,6 +194,11 @@ class DHTSniffer extends EventEmitter {
             });
         }
     }
+    /**
+     * @param infoHash
+     * @param peer
+     * @param reverse default is false -> the infoHash is from `find_node` message, while true, it is from `lookup` function.
+     */
     addQueuingMetadata(infoHash, peer, reverse = false) {
         let arr = this.metadataWaitingQueues;
         let infoHashStr = infoHash.toString("hex");
@@ -203,6 +208,7 @@ class DHTSniffer extends EventEmitter {
             arr.shift();
         }
         this.dispatchMetadata();
+        this.boostMetadataFetching();
     }
     dispatchMetadata() {
         let _this = this;
@@ -272,6 +278,19 @@ class DHTSniffer extends EventEmitter {
         // boost efficiency
         this.dispatchMetadata();
     }
+    boostMetadataFetching() {
+        while (true) {
+            if (this.metadataWaitingQueues.length === 0) break;
+            let fetchingLength = Object.keys(this.metadataFetchingDict).length;
+            if (fetchingLength >= this._options.maximumParallelFetchingTorrent) break;
+            let waitingKeysNumber = this.getUniqueWaitingKeys().length;
+            if (waitingKeysNumber > fetchingLength) {
+                this.dispatchMetadata();
+            } else {
+                break;
+            }
+        }
+    }
     removeDuplicatedWaitingObjects(infoHashStr) {
         this.metadataWaitingQueues = this.metadataWaitingQueues.filter(waitingObject => infoHashStr !== waitingObject["infoHashStr"]);
     }
@@ -281,6 +300,7 @@ class DHTSniffer extends EventEmitter {
         return {
             fetchingNum: fetchings.length,
             metadataWaitingQueueSize: this.metadataWaitingQueues.length,
+            uniqueWaitingKeys: this.getUniqueWaitingKeys().length,
             fetchdTupleSize: this.fetchdTuple.keyMap.size,
             fetchdInfoHashSize: this.fetchdInfoHash.keyMap.size,
             metadataFetchingCacheSize: this.metadataFetchingCache.keyMap.size,
@@ -300,6 +320,14 @@ class DHTSniffer extends EventEmitter {
             peer
         } = nextFetching;
         return `${peer["host"]}:${peer["port"]}-${infoHash.toString("hex")}`;
+    }
+    getUniqueWaitingKeys() {
+        let keysDict = this.metadataWaitingQueues.reduce((prev, curr) => {
+            prev[curr["infoHashStr"]] = 1;
+            return prev;
+        }, {});
+        let keys = Object.keys(keysDict);
+        return keys;
     }
 }
 
