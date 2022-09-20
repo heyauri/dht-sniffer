@@ -112,5 +112,5 @@ Boolean value. If true, the service will ignore fetched requests this are still 
 ### concurrency
 The number of concurrent requests of the DHT service, mainly related to the `find_node` requests. Default value is 16, and it is enough under most circumstances.
 
-### fetchdTupleSize
-The size of the internal LRU cache `fetchdTupleSize` which will store the tuple like `{infoHash, peer}`. While the `ignoreFetched` option is set to `true` and the tuple is still kept in cache, the metadata fetching requests will be ignored.
+### fetchedTupleSize
+The size of the internal LRU cache `fetchedTupleSize` which will store the tuple like `{infoHash, peer}`. While the `ignoreFetched` option is set to `true` and the tuple is still kept in cache, the metadata fetching requests will be ignored.

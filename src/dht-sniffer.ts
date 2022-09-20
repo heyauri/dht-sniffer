@@ -16,10 +16,10 @@ class DHTSniffer extends EventEmitter {
     metadataWaitingQueues: Array<any>;
     metadataFetchingDict: any;
     metadataFetchingCache: any;
-    fetchdTuple: any;
+    fetchedTuple: any;
     findNodeCache: any;
     latestCalledPeers: any;
-    fetchdInfoHash: any;
+    fetchedInfoHash: any;
     nodes: any;
     counter: any;
     constructor(options) {
@@ -34,8 +34,8 @@ class DHTSniffer extends EventEmitter {
                 aggressive: false,
                 ignoreFetched: true,
                 concurrency: 16,
-                fetchdTupleSize: 4000,
-                fetchdInfoHashSize: 1000,
+                fetchedTupleSize: 4000,
+                fetchedInfoHashSize: 1000,
                 findNodeCacheSize: 4000
             },
             options
@@ -44,8 +44,8 @@ class DHTSniffer extends EventEmitter {
         this.metadataWaitingQueues = [];
         this.nodes = [];
         this.metadataFetchingDict = {};
-        this.fetchdTuple = new LRU({ max: this._options.fetchdTupleSize, ttl: 3 * 60 * 60 * 1000 });
-        this.fetchdInfoHash = new LRU({ max: this._options.fetchdInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
+        this.fetchedTuple = new LRU({ max: this._options.fetchedTupleSize, ttl: 3 * 60 * 60 * 1000 });
+        this.fetchedInfoHash = new LRU({ max: this._options.fetchedInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
         this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
         this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
         this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
@@ -242,20 +242,20 @@ class DHTSniffer extends EventEmitter {
             }
             return;
         }
-        if (this._options["ignoreFetched"] && this.fetchdTuple.get(nextFetchingKey)) {
-            // console.log("fetchdTuple ignore")
+        if (this._options["ignoreFetched"] && this.fetchedTuple.get(nextFetchingKey)) {
+            // console.log("fetchedTuple ignore")
             this.counter.fetchedTupleHit++;
             this.dispatchMetadata();
             return;
         }
-        if (this._options["ignoreFetched"] && this.fetchdInfoHash.get(infoHashStr)) {
-            // console.log("fetchdInfoHash ignore")
+        if (this._options["ignoreFetched"] && this.fetchedInfoHash.get(infoHashStr)) {
+            // console.log("fetchedInfoHash ignore")
             this.counter.fetchedInfoHashHit++;
             this.dispatchMetadata();
             return;
         }
         this.metadataFetchingDict[infoHashStr] = 1;
-        this.fetchdTuple.set(nextFetchingKey, 1);
+        this.fetchedTuple.set(nextFetchingKey, 1);
         metadataHelper
             .fetch({
                 infoHash,
@@ -269,7 +269,7 @@ class DHTSniffer extends EventEmitter {
                     infoHash,
                     metadata
                 );
-                _this.fetchdInfoHash.set(infoHashStr, 1);
+                _this.fetchedInfoHash.set(infoHashStr, 1);
                 if (_this._options["ignoreFetched"]) {
                     _this.removeDuplicatedWaitingObjects(infoHashStr)
                 }
@@ -312,16 +312,16 @@ class DHTSniffer extends EventEmitter {
             fetchingNum: fetchings.length,
             metadataWaitingQueueSize: this.metadataWaitingQueues.length,
             uniqueWaitingKeys: this.getUniqueWaitingKeys().length,
-            fetchdTupleSize: this.fetchdTuple.keyMap.size,
-            fetchdInfoHashSize: this.fetchdInfoHash.keyMap.size,
-            fetchdTupleHit: this.counter.fetchdTupleHit,
+            fetchedTupleSize: this.fetchedTuple.keyMap.size,
+            fetchedInfoHashSize: this.fetchedInfoHash.keyMap.size,
+            fetchedTupleHit: this.counter.fetchedTupleHit,
             fetchedInfoHashHit: this.counter.fetchedInfoHashHit,
             metadataFetchingCacheSize: this.metadataFetchingCache.keyMap.size,
             rpcPendingSize: this.rpc.pending.length,
             nodeListSize: this.nodes.length
         }
-        // console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchdTuple.keyMap.size,
-        // this.fetchdInfoHash.keyMap.size, this.rpc.pending.length);
+        // console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchedTuple.keyMap.size,
+        // this.fetchedInfoHash.keyMap.size, this.rpc.pending.length);
     }
     reduceRPCPendingArray() {
         let pending = this.rpc.pending.slice(0, 1000);
