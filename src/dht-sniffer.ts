@@ -104,7 +104,7 @@ class DHTSniffer extends EventEmitter {
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
                     let nodeKey = `${node["host"]}:${node["port"]}`;
-                    if (!_this.latestCalledPeers.get(nodeKey) && _this.nodes.length < 400 && _this.metadataWaitingQueues.length < 1000 && Math.random() > _this.rpc.pending.length / 12) {
+                    if (!_this.latestCalledPeers.get(nodeKey) && _this.nodes.length < 400 && Math.random() > _this.rpc.pending.length / 12) {
                         // console.log('try find nodes', node);
                         _this.findNode(node, _this.rpc.id);
                     }
