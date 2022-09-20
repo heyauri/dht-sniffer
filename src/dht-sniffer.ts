@@ -21,6 +21,7 @@ class DHTSniffer extends EventEmitter {
     latestCalledPeers: any;
     fetchdInfoHash: any;
     nodes: any;
+    counter: any;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -48,6 +49,10 @@ class DHTSniffer extends EventEmitter {
         this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
         this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
         this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
+        this.counter = {
+            fetchedTupleHit: 0,
+            fetchedInfoHashHit: 0
+        }
     }
 
     start() {
@@ -239,11 +244,13 @@ class DHTSniffer extends EventEmitter {
         }
         if (this._options["ignoreFetched"] && this.fetchdTuple.get(nextFetchingKey)) {
             // console.log("fetchdTuple ignore")
+            this.counter.fetchedTupleHit++;
             this.dispatchMetadata();
             return;
         }
         if (this._options["ignoreFetched"] && this.fetchdInfoHash.get(infoHashStr)) {
             // console.log("fetchdInfoHash ignore")
+            this.counter.fetchedInfoHashHit++;
             this.dispatchMetadata();
             return;
         }
@@ -307,6 +314,8 @@ class DHTSniffer extends EventEmitter {
             uniqueWaitingKeys: this.getUniqueWaitingKeys().length,
             fetchdTupleSize: this.fetchdTuple.keyMap.size,
             fetchdInfoHashSize: this.fetchdInfoHash.keyMap.size,
+            fetchdTupleHit: this.counter.fetchdTupleHit,
+            fetchedInfoHashHit: this.counter.fetchedInfoHashHit,
             metadataFetchingCacheSize: this.metadataFetchingCache.keyMap.size,
             rpcPendingSize: this.rpc.pending.length,
             nodeListSize: this.nodes.length
