@@ -76,6 +76,7 @@ class DHTSniffer extends EventEmitter {
          *  emit data like {infoHash, peer: { host: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
          */
         this.dht.on('get_peers', data => {
+            if(!data["peer"].id) data["peer"].id = utils.getRandomId();
             _this.dht.addNode(data["peer"]);
             _this.emit('infoHash', data["infoHash"], data["peer"]);
         });
@@ -109,8 +110,7 @@ class DHTSniffer extends EventEmitter {
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
                     let nodeKey = `${node["host"]}:${node["port"]}`;
-                    if (!_this.latestCalledPeers.get(nodeKey) && _this.nodes.length < 400 && Math.random() > _this.rpc.pending.length / 12) {
-                        // console.log('try find nodes', node);
+                    if (_this.nodes.length < 5 || (!_this.latestCalledPeers.get(nodeKey) && _this.nodes.length < 400 && Math.random() > _this.rpc.pending.length / 12)) {
                         _this.findNode(node, _this.rpc.id);
                     }
                 });
@@ -293,7 +293,7 @@ class DHTSniffer extends EventEmitter {
             if (fetchingLength >= this._options.maximumParallelFetchingTorrent) break;
             let waitingKeysNumber = this.getUniqueWaitingKeys().length;
             if (waitingKeysNumber > fetchingLength) {
-                if (counter === undefined) counter = waitingKeysNumber;
+                if (counter === undefined) counter = this.metadataWaitingQueues.length;
                 this.dispatchMetadata();
                 counter--;
                 if (counter <= 0) break;

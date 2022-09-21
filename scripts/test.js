@@ -5,7 +5,7 @@ const path = require("path");
 
 let sniffer = new DHTSniffer(
     {
-        port: 6881, maximumParallelFetchingTorrent: 20, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchdTupleSize: 100000, ignoreFetched: true, fetchdInfoHashSize: 100000, findNodeCacheSize: 100000
+        port: 6881, maximumParallelFetchingTorrent: 20, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000
     });
 sniffer.start();
 sniffer.on('infoHash', (infoHash, peer) => {

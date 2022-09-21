@@ -6,7 +6,7 @@ const heapdump = require("heapdump");
 let sniffer = new DHTSniffer(
     {
         port: 6881, maximumParallelFetchingTorrent: 30
-        , maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 10000, aggressive: false, fetchdTupleSize: 100000, ignoreFetched: true, fetchdInfoHashSize: 100000, findNodeCacheSize: 100000
+        , maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 10000, aggressive: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000
     });
 sniffer.start();
 sniffer.on('infoHash', (infoHash, peer) => {
