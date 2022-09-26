@@ -20,6 +20,7 @@ class DHTSniffer extends EventEmitter {
     findNodeCache: any;
     latestCalledPeers: any;
     fetchedInfoHash: any;
+    usefulPeers: any;
     nodes: any;
     counter: any;
     constructor(options) {
@@ -36,7 +37,8 @@ class DHTSniffer extends EventEmitter {
                 concurrency: 16,
                 fetchedTupleSize: 4000,
                 fetchedInfoHashSize: 1000,
-                findNodeCacheSize: 4000
+                findNodeCacheSize: 4000,
+                aggressiveLevel: 1
             },
             options
         );
@@ -48,6 +50,7 @@ class DHTSniffer extends EventEmitter {
         this.fetchedInfoHash = new LRU({ max: this._options.fetchedInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
         this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
         this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
+        this.usefulPeers = new LRU({ max: 5000 });
         this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
         this.counter = {
             fetchedTupleHit: 0,
@@ -76,7 +79,6 @@ class DHTSniffer extends EventEmitter {
          *  emit data like {infoHash, peer: { host: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
          */
         this.dht.on('get_peers', data => {
-            if(!data["peer"].id) data["peer"].id = utils.getRandomId();
             _this.dht.addNode(data["peer"]);
             _this.emit('infoHash', data["infoHash"], data["peer"]);
         });
@@ -85,17 +87,20 @@ class DHTSniffer extends EventEmitter {
             _this.latestReceive = new Date();
             _this.emit('node', node);
             let nodeKey = `${node["host"]}:${node["port"]}`;
-            if (!_this.findNodeCache.get(nodeKey) && !_this.latestCalledPeers.get(nodeKey) && Math.random() > _this.rpc.pending.length / 10 && _this.nodes.length < 200) {
+            if (!_this.findNodeCache.get(nodeKey) && !_this.latestCalledPeers.get(nodeKey) && Math.random() > _this.rpc.pending.length / 10 && _this.nodes.length < 400) {
                 _this.findNode(node, node.id);
             }
         });
+
+        this.dht.on("addNode", node => {
+            // console.log(node)
+        })
 
         /**
          * Found potential peer of InfoHash.
          */
         this.dht.on('peer', function (peer, infoHash, from) {
             // console.log('found potential peer ' + peer.host + ':' + peer.port + ' through ' + from.address + ':' + from.port, infoHash)
-            peer["id"] = crypto.createHash('sha1').update(`${peer.host}:${peer.port}`).digest();
             _this.dht.addNode(peer);
             _this.addQueuingMetadata(infoHash, peer, true);
         });
@@ -114,7 +119,6 @@ class DHTSniffer extends EventEmitter {
                         _this.findNode(node, _this.rpc.id);
                     }
                 });
-
             }
             if (nodes.length <= 3) {
                 _this.dht._bootstrap(true);
@@ -126,6 +130,7 @@ class DHTSniffer extends EventEmitter {
                 utils.shuffle(_this.metadataWaitingQueues);
             }
             this.boostMetadataFetching();
+            this.importUsefulPeers();
         }, this._options.refreshTime);
         this.status = true;
     }
@@ -270,6 +275,7 @@ class DHTSniffer extends EventEmitter {
                     metadata
                 );
                 _this.fetchedInfoHash.set(infoHashStr, 1);
+                _this.usefulPeers.set(`${peer["host"]}:${peer["port"]}`, peer);
                 if (_this._options["ignoreFetched"]) {
                     _this.removeDuplicatedWaitingObjects(infoHashStr)
                 }
@@ -341,6 +347,11 @@ class DHTSniffer extends EventEmitter {
         }, {});
         let keys = Object.keys(keysDict);
         return keys;
+    }
+    importUsefulPeers() {
+        for (let peer of this.usefulPeers.values()) {
+            this.dht.addNode(peer);
+        }
     }
 }
 

@@ -34,12 +34,12 @@ export function isNodeId(id, idLength) {
  * @returns
  */
 export function parseNodes(buf, idLength) {
-    var contacts = []
+    var pNodes = []
     try {
         for (var i = 0; i < buf.length; i += (idLength + 6)) {
             var port = buf.readUInt16BE(i + (idLength + 4))
             if (!port) continue
-            contacts.push({
+            pNodes.push({
                 id: buf.slice(i, i + idLength),
                 host: parseIp(buf, i + idLength),
                 port: port,
@@ -50,7 +50,7 @@ export function parseNodes(buf, idLength) {
     } catch (err) {
         // do nothing
     }
-    return contacts
+    return pNodes
 }
 
 export function shuffle(array) {

@@ -5,7 +5,8 @@
     "main": "lib/dht-sniffer.js",
     "scripts": {
         "test": "tsc & node scripts/test.js",
-        "prd": "pm2 start scripts/test.js --name dht --max-memory-restart 1000M"
+        "prd": "pm2 start scripts/test.js --name dht --max-memory-restart 1000M",
+        "stat": "node scripts/statistic.js"
     },
     "repository": {
         "type": "git",

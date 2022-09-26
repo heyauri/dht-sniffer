@@ -22,7 +22,6 @@ export function fetch(target, config) {
             wire.handshake(infoHash, utils.getRandomId());
             // 'metadata' event will fire when the metadata arrives and is verified to be correct!
             wire.ut_metadata.on('metadata', metadata => {
-                console.log("success", metadata);
                 resolve(metadata);
                 socket.end();
                 wire.destroy();

@@ -213,7 +213,10 @@ export class DHT extends EventEmitter {
             return;
         }
         this._sendPing(node, (_, node) => {
-            if (node) self.addNode(node);
+            if (node) {
+                this.emit('addNode', node);
+                self.addNode(node)
+            };
         });
     }
 

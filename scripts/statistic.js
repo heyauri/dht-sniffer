@@ -12,7 +12,7 @@ for (let f of fs.readdirSync(baseDir)) {
     let buf = fs.readFileSync(fp);
     let metadata = sniffer.parseMetaData(buf);
     let fps = metadata.filePaths;
-    // console.log(metadata.infoHash);
+    console.log(metadata.name);
     for (let fn of fps) {
         fn in fn_dict ? fn_dict[fn] += 1 : fn_dict[fn] = 1;
     }
