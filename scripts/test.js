@@ -25,7 +25,7 @@ sniffer.on('error', err => {
     // console.error(err);
 });
 
-let timpstamp = Date.now();
+let timestamp = Date.now();
 
 sniffer.on("metadata", (infoHash, metadata) => {
     console.log("success", infoHash, metadata);
@@ -41,7 +41,31 @@ sniffer.on("metadataError", data => {
     // console.error("fail", data["infoHash"], data["error"]);
 })
 
+let userfulPeerDict = require("../useful-peers.json");
+
+for (let peer of Object.values(userfulPeerDict)) {
+    sniffer.importPeer(peer);
+}
+
 setInterval(() => {
-    // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
+    console.log(Object.values(sniffer.getSizes()).join(" "));
+    let usefulPeers = sniffer.exportUsefulPeers();
+    for (let peer of usefulPeers) {
+        let peerKey = `${peer.host}:${peer.port}`;
+        if (!Reflect.has(userfulPeerDict, peerKey)) {
+            userfulPeerDict[peerKey] = {
+                host: peer.host, port: peer.port, value: 1, lastSeen: timestamp
+            }
+        }
+        if (userfulPeerDict[peerKey].lastSeen !== timestamp) {
+            userfulPeerDict[peerKey]["value"] += 1;
+            userfulPeerDict[peerKey].lastSeen = timestamp;
+        }
+    }
+    fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(userfulPeerDict));
+}, 60 * 1000)
+
+setInterval(() => {
+    // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timestamp + '.heapsnapshot'));
     console.log(Object.values(sniffer.getSizes()).join(" "));
 }, 60 * 1000)

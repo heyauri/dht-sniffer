@@ -349,9 +349,18 @@ class DHTSniffer extends EventEmitter {
         return keys;
     }
     importUsefulPeers() {
-        for (let peer of this.usefulPeers.values()) {
-            this.dht.addNode(peer);
+        let peers = utils.shuffle([...this.usefulPeers.values()]);
+        for (let peer of peers) {
+            if (Math.random() > Math.min(0.99, (this.rpc.pending.length / 50 + this.nodes.length / 500))) {
+                this.dht.addNode(peer);
+            }
         }
+    }
+    importPeer(peer) {
+        this.dht.addNode({ host: peer.host, port: peer.port });
+    }
+    exportUsefulPeers() {
+        return [...this.usefulPeers.values()];
     }
 }
 
