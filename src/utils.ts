@@ -69,3 +69,7 @@ export function shuffle(array) {
     }
     return result
 }
+
+export function getPeerKey(peer) {
+    return `${peer["host"]}:${peer["port"]}`;
+}

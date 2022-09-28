@@ -22,6 +22,7 @@ class DHTSniffer extends EventEmitter {
     fetchedInfoHash: any;
     usefulPeers: any;
     nodes: any;
+    nodesDict: Object;
     counter: any;
     constructor(options) {
         super();
@@ -45,6 +46,7 @@ class DHTSniffer extends EventEmitter {
         this.status = false;
         this.metadataWaitingQueues = [];
         this.nodes = [];
+        this.nodesDict = {};
         this.metadataFetchingDict = {};
         this.fetchedTuple = new LRU({ max: this._options.fetchedTupleSize, ttl: 3 * 60 * 60 * 1000 });
         this.fetchedInfoHash = new LRU({ max: this._options.fetchedInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
@@ -79,7 +81,7 @@ class DHTSniffer extends EventEmitter {
          *  emit data like {infoHash, peer: { host: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
          */
         this.dht.on('get_peers', data => {
-            _this.dht.addNode(data["peer"]);
+            _this.importPeer(data["peer"]);
             _this.emit('infoHash', data["infoHash"], data["peer"]);
         });
 
@@ -87,7 +89,8 @@ class DHTSniffer extends EventEmitter {
             _this.latestReceive = new Date();
             _this.emit('node', node);
             let nodeKey = `${node["host"]}:${node["port"]}`;
-            if (!_this.findNodeCache.get(nodeKey) && !_this.latestCalledPeers.get(nodeKey) && Math.random() > _this.rpc.pending.length / 10 && _this.nodes.length < 400) {
+            if (!_this.findNodeCache.get(nodeKey) && !_this.latestCalledPeers.get(nodeKey) && Math.random() > 0.1 +
+                _this.rpc.pending.length / 10 && _this.nodes.length < 400) {
                 _this.findNode(node, node.id);
             }
         });
@@ -101,7 +104,7 @@ class DHTSniffer extends EventEmitter {
          */
         this.dht.on('peer', function (peer, infoHash, from) {
             // console.log('found potential peer ' + peer.host + ':' + peer.port + ' through ' + from.address + ':' + from.port, infoHash)
-            _this.dht.addNode(peer);
+            _this.importPeer(peer);
             _this.addQueuingMetadata(infoHash, peer, true);
         });
 
@@ -111,6 +114,10 @@ class DHTSniffer extends EventEmitter {
         this.refreshIntervalId = setInterval(() => {
             let nodes = this.dht._rpc.nodes.toArray();
             this.nodes = nodes;
+            this.nodesDict = nodes.reduce((prev, curr) => {
+                prev[utils.getPeerKey(curr)] = 1;
+                return prev;
+            }, {})
             utils.shuffle(this.nodes)
             if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
@@ -143,7 +150,7 @@ class DHTSniffer extends EventEmitter {
     }
     findNode(peer, nid) {
         const _this = this;
-        let nodeKey = `${peer["host"]}:${peer["port"]}`;
+        let nodeKey = utils.getPeerKey(peer);
         this.findNodeCache.set(nodeKey, 1);
         this.latestCalledPeers.set(nodeKey, 1);
         let id = nid !== undefined ? utils.getNeighborId(nid, this.dht.nodeId) : this.dht.nodeId;
@@ -172,7 +179,7 @@ class DHTSniffer extends EventEmitter {
                     if (utils.isNodeId(node.id, 20)) {
                         // console.log(node);
                         // _this.rpc.nodes.add(node);
-                        _this.dht.addNode(node);
+                        _this.importPeer(node);
                     }
                 }
             }
@@ -352,12 +359,14 @@ class DHTSniffer extends EventEmitter {
         let peers = utils.shuffle([...this.usefulPeers.values()]);
         for (let peer of peers) {
             if (Math.random() > Math.min(0.99, (this.rpc.pending.length / 50 + this.nodes.length / 500))) {
-                this.dht.addNode(peer);
+                this.importPeer(peer);
             }
         }
     }
     importPeer(peer) {
-        this.dht.addNode({ host: peer.host, port: peer.port });
+        if (!Reflect.has(this.nodesDict, utils.getPeerKey(peer))) {
+            this.dht.addNode({ host: peer.host, port: peer.port });
+        }
     }
     exportUsefulPeers() {
         return [...this.usefulPeers.values()];
