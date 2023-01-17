@@ -9,6 +9,7 @@ import * as LRU from "lru-cache";
 class DHTSniffer extends EventEmitter {
     private _options: any;
     dht: any;
+    startTime: any;
     latestReceive: Date;
     refreshIntervalId: any;
     rpc: any;
@@ -71,8 +72,13 @@ class DHTSniffer extends EventEmitter {
         });
         this.rpc = this.dht._rpc;
         this.latestReceive = new Date();
+        this.startTime = Date.now();
         this.dht.listen(this._options.port, () => {
             console.log(`DHT init: now listening:${_this._options.port}`);
+            _this.emit("start", {
+                startTime: this.startTime,
+                ..._this._options
+            })
         });
         this.dht.on('warning', err => _this.emit('warning', err));
         this.dht.on('error', err => _this.emit('error', err));
@@ -331,7 +337,8 @@ class DHTSniffer extends EventEmitter {
             fetchedInfoHashHit: this.counter.fetchedInfoHashHit,
             metadataFetchingCacheSize: this.metadataFetchingCache.keyMap.size,
             rpcPendingSize: this.rpc.pending.length,
-            nodeListSize: this.nodes.length
+            nodeListSize: this.nodes.length,
+            runTime: ((Date.now() - this.startTime) / 1000).toFixed(2)
         }
         // console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchedTuple.keyMap.size,
         // this.fetchedInfoHash.keyMap.size, this.rpc.pending.length);

@@ -5,9 +5,12 @@ const path = require("path");
 
 let sniffer = new DHTSniffer(
     {
-        port: 6881, maximumParallelFetchingTorrent: 20, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000
+        port: 6881, maximumParallelFetchingTorrent: 30, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000
     });
 sniffer.start();
+sniffer.on("start", infos => {
+    console.log(infos);
+})
 sniffer.on('infoHash', (infoHash, peer) => {
     // console.log('get infoHash:', infoHash, peer);
     if (!fs.existsSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`))) {
@@ -60,6 +63,13 @@ setInterval(() => {
         if (userfulPeerDict[peerKey].lastSeen !== timestamp) {
             userfulPeerDict[peerKey]["value"] += 1;
             userfulPeerDict[peerKey].lastSeen = timestamp;
+        }
+    }
+    let now = new Date().getTime();
+    for (let key in userfulPeerDict) {
+        let peer = userfulPeerDict[key];
+        if (peer.value == 1 && now - peer.lastSeen > 60 * 86400 * 1000) {
+            Reflect.deleteProperty(userfulPeerDict, key);
         }
     }
     fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(userfulPeerDict));
