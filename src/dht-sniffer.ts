@@ -152,6 +152,7 @@ class DHTSniffer extends EventEmitter {
         this.dht.destory(() => {
             clearInterval(_this.refreshIntervalId);
             _this.status = false;
+            _this.emit("stop")
         });
     }
     findNode(peer, nid) {
