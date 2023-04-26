@@ -1,7 +1,11 @@
 # dht-sniffer
 
+[![npm](https://img.shields.io/npm/v/dht-sniffer.svg?label=&logo=npm)](https://www.npmjs.com/package/dht-sniffer)
+[![Node version](https://img.shields.io/node/v/dht-sniffer.svg)](https://www.npmjs.com/package/dht-sniffer)
+
+
 ## Introduction
-A nodejs based dht-sniffer, including a metadata(torrent) module that can be used to fetch and parse matadata.
+A nodejs based dht-sniffer, including a metadata(torrent) module that can be used to fetch and parse metadata of torrents.
 
 ## Example
 ```js
@@ -43,10 +47,10 @@ sniffer.on("metadataError", data => {
 ## API
 
 ### `sniffer.start()`
-Starting to sniffe infoHash from the DHT network, should be called after the initialization of the service.
+Start sniffing infoHash from the DHT network, should be called after initializing the service.
 
 ### `sniffer.stop()`
-Stop the sniffe service and destroy the inner DHT instance.
+Stop the sniff service and destroy the inner DHT instance.
 
 ### `sniffer.fetchMetaData(target)`
 Fetch the target metadata from the target peer.
@@ -95,7 +99,7 @@ The port number of the DHTSniffer service. Default is 6881.
 If the sniffer have not received any message from the DHT network during a time period, if will sent the `find_node` message to other nodes. By default the refreshTime is set to 1 minute, i.e. 1*60*1000 ms.
 
 ### maximumParallelFetchingTorrent
-Because every metadata request will last for seconds, the service will fetch meatadata parallelly. This option is used to limit the number of the parallel requests. Default value is 16.
+Because every metadata request will last for seconds, the service will fetch metadata parallel. This option is used to limit the number of the parallel requests. Default value is 16.
 
 ### maximumWaitingQueueSize
 While there is more than 25 (or your setting value) metadata requests, the call of `sniffer.fetchMetaData` function will be put into a waiting queue. This option is to set the size of the waiting queue. Default value is -1 which means no limit.
@@ -103,7 +107,7 @@ While there is more than 25 (or your setting value) metadata requests, the call 
 ### downloadMaxTime
 If the pending request exceeds this value, it will time out. Default value is 30*1000 ms.
 
-### aggressive
+### expandNodes
 Boolean value. If true, the service will look for other nodes very aggressive. Default value is false.
 
 ### ignoreFetched
@@ -114,3 +118,6 @@ The number of concurrent requests of the DHT service, mainly related to the `fin
 
 ### fetchedTupleSize
 The size of the internal LRU cache `fetchedTupleSize` which will store the tuple like `{infoHash, peer}`. While the `ignoreFetched` option is set to `true` and the tuple is still kept in cache, the metadata fetching requests will be ignored.
+
+### aggressiveLevel
+The default is set to `0`. In general, the sniffer will only try to fetch one torrent with the same infoHash at a time. This can help improve the efficiency of the sniffer by avoiding fetching duplicate torrents. However, if the sniffer only fetches one or two infoHashes, this feature can slow down the process of fetching a single infoHash. So this option can be set to a value of `0~1` to increase the number of parallel fetches of the same infoHash.

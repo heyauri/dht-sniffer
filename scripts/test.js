@@ -5,7 +5,7 @@ const path = require("path");
 
 let sniffer = new DHTSniffer(
     {
-        port: 6881, maximumParallelFetchingTorrent: 30, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, aggressive: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000
+        port: 6881, maximumParallelFetchingTorrent: 40, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, expandInfoHash: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000, aggressiveLevel: 0.1
     });
 sniffer.start();
 sniffer.on("start", infos => {
@@ -44,9 +44,9 @@ sniffer.on("metadataError", data => {
     // console.error("fail", data["infoHash"], data["error"]);
 })
 
-let userfulPeerDict = require("../useful-peers.json");
+let usefulPeerDict = require("../useful-peers.json");
 
-for (let peer of Object.values(userfulPeerDict)) {
+for (let peer of Object.values(usefulPeerDict)) {
     sniffer.importPeer(peer);
 }
 
@@ -55,24 +55,24 @@ setInterval(() => {
     let usefulPeers = sniffer.exportUsefulPeers();
     for (let peer of usefulPeers) {
         let peerKey = `${peer.host}:${peer.port}`;
-        if (!Reflect.has(userfulPeerDict, peerKey)) {
-            userfulPeerDict[peerKey] = {
+        if (!Reflect.has(usefulPeerDict, peerKey)) {
+            usefulPeerDict[peerKey] = {
                 host: peer.host, port: peer.port, value: 1, lastSeen: timestamp
             }
         }
-        if (userfulPeerDict[peerKey].lastSeen !== timestamp) {
-            userfulPeerDict[peerKey]["value"] += 1;
-            userfulPeerDict[peerKey].lastSeen = timestamp;
+        if (usefulPeerDict[peerKey].lastSeen !== timestamp) {
+            usefulPeerDict[peerKey]["value"] += 1;
+            usefulPeerDict[peerKey].lastSeen = timestamp;
         }
     }
     let now = new Date().getTime();
-    for (let key in userfulPeerDict) {
-        let peer = userfulPeerDict[key];
+    for (let key in usefulPeerDict) {
+        let peer = usefulPeerDict[key];
         if (peer.value == 1 && now - peer.lastSeen > 60 * 86400 * 1000) {
-            Reflect.deleteProperty(userfulPeerDict, key);
+            Reflect.deleteProperty(usefulPeerDict, key);
         }
     }
-    fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(userfulPeerDict));
+    fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(usefulPeerDict));
 }, 60 * 1000)
 
 setInterval(() => {

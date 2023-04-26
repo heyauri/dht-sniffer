@@ -25,6 +25,7 @@ class DHTSniffer extends EventEmitter {
     nodes: any;
     nodesDict: Object;
     counter: any;
+    aggressiveLimit: number;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -34,13 +35,13 @@ class DHTSniffer extends EventEmitter {
                 maximumParallelFetchingTorrent: 16,
                 maximumWaitingQueueSize: -1,
                 downloadMaxTime: 30000,
-                aggressive: false,
+                expandNodes: false,
                 ignoreFetched: true,
                 concurrency: 16,
                 fetchedTupleSize: 4000,
                 fetchedInfoHashSize: 1000,
                 findNodeCacheSize: 4000,
-                aggressiveLevel: 1
+                aggressiveLevel: 0
             },
             options
         );
@@ -55,6 +56,8 @@ class DHTSniffer extends EventEmitter {
         this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
         this.usefulPeers = new LRU({ max: 5000 });
         this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
+        let aggressiveLevel = this._options["aggressiveLevel"]
+        this.aggressiveLimit = aggressiveLevel && aggressiveLevel > 0 ? aggressiveLevel * this._options["maximumParallelFetchingTorrent"] : 0
         this.counter = {
             fetchedTupleHit: 0,
             fetchedInfoHashHit: 0
@@ -125,7 +128,7 @@ class DHTSniffer extends EventEmitter {
                 return prev;
             }, {})
             utils.shuffle(this.nodes)
-            if (_this._options["aggressive"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
+            if (_this._options["expandNodes"] || new Date().getTime() - _this.latestReceive.getTime() > _this._options.refreshTime) {
                 nodes.map(node => {
                     let nodeKey = `${node["host"]}:${node["port"]}`;
                     if (_this.nodes.length < 5 || (!_this.latestCalledPeers.get(nodeKey) && _this.nodes.length < 400 && Math.random() > _this.rpc.pending.length / 12)) {
@@ -149,7 +152,7 @@ class DHTSniffer extends EventEmitter {
     }
     stop() {
         const _this = this;
-        this.dht.destory(() => {
+        this.dht.destroy(() => {
             clearInterval(_this.refreshIntervalId);
             _this.status = false;
             _this.emit("stop")
@@ -190,7 +193,7 @@ class DHTSniffer extends EventEmitter {
                     }
                 }
             }
-            // console.log("make neighboor query", err, reply);
+            // console.log("make neighbor query", err, reply);
         });
     }
     /**
@@ -253,13 +256,17 @@ class DHTSniffer extends EventEmitter {
          */
         if (Reflect.has(this.metadataFetchingDict, infoHashStr)) {
             // console.log("fetching ignore")
-            this.metadataWaitingQueues.unshift(nextFetching);
-            if (!this.metadataFetchingCache.get(infoHashStr)) {
-                // console.log("insert fetching cache")
-                this.metadataFetchingCache.set(infoHashStr, 1);
-                this.dispatchMetadata();
+            if (this.aggressiveLimit > 0 && this.aggressiveLimit > fetchings.length) {
+                // AGGRESSIVE CHOICE: continue to fetch this tuple
+            } else {
+                this.metadataWaitingQueues.unshift(nextFetching);
+                if (!this.metadataFetchingCache.get(infoHashStr)) {
+                    // console.log("insert fetching cache")
+                    this.metadataFetchingCache.set(infoHashStr, 1);
+                    this.dispatchMetadata();
+                }
+                return;
             }
-            return;
         }
         if (this._options["ignoreFetched"] && this.fetchedTuple.get(nextFetchingKey)) {
             // console.log("fetchedTuple ignore")
@@ -273,7 +280,11 @@ class DHTSniffer extends EventEmitter {
             this.dispatchMetadata();
             return;
         }
-        this.metadataFetchingDict[infoHashStr] = 1;
+        if (!this.metadataFetchingDict[infoHashStr]) {
+            this.metadataFetchingDict[infoHashStr] = 1;
+        } else if (this.aggressiveLimit > 0) {
+            this.metadataFetchingDict[infoHashStr] += 1;
+        }
         this.fetchedTuple.set(nextFetchingKey, 1);
         metadataHelper
             .fetch({
@@ -300,7 +311,11 @@ class DHTSniffer extends EventEmitter {
                 });
             }).finally(() => {
                 _this.dispatchMetadata();
-                Reflect.deleteProperty(_this.metadataFetchingDict, infoHashStr);
+                if (_this.metadataFetchingDict[infoHashStr] && _this.metadataFetchingDict[infoHashStr] > 1) {
+                    this.metadataFetchingDict[infoHashStr] -= 1;
+                } else {
+                    Reflect.deleteProperty(_this.metadataFetchingDict, infoHashStr);
+                }
             });
         // boost efficiency
         this.dispatchMetadata();
@@ -380,5 +395,5 @@ class DHTSniffer extends EventEmitter {
         return [...this.usefulPeers.values()];
     }
 }
-
-export { DHTSniffer };
+let parseMetaData = metadataHelper.parseMetaData;
+export { DHTSniffer, parseMetaData };
