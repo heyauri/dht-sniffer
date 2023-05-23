@@ -260,6 +260,7 @@ class DHTSniffer extends EventEmitter {
                 // AGGRESSIVE CHOICE: continue to fetch this tuple
             } else {
                 this.metadataWaitingQueues.unshift(nextFetching);
+                // To prevent endless dispatch of duplicate infoHashes that are still fetching
                 if (!this.metadataFetchingCache.get(infoHashStr)) {
                     // console.log("insert fetching cache")
                     this.metadataFetchingCache.set(infoHashStr, 1);
@@ -316,6 +317,7 @@ class DHTSniffer extends EventEmitter {
                 } else {
                     Reflect.deleteProperty(_this.metadataFetchingDict, infoHashStr);
                 }
+                this.metadataFetchingCache.delete(infoHashStr);
             });
         // boost efficiency
         this.dispatchMetadata();
