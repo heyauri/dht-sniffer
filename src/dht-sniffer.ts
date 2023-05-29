@@ -396,6 +396,25 @@ class DHTSniffer extends EventEmitter {
     exportUsefulPeers() {
         return [...this.usefulPeers.values()];
     }
+    exportWaitingQueue() {
+        return [...this.metadataWaitingQueues];
+    }
+    importWaitingQueue(arr) {
+        if (!arr || Object.prototype.toString.call(arr) !== '[object Array]') {
+            console.error("Not an array");
+            return;
+        }
+        for (let tuple of arr) {
+            if (!tuple.peer || !tuple.peer.host || !tuple.peer.port) {
+                continue;
+            }
+            if (!tuple.infoHashStr) {
+                continue;
+            }
+            tuple.infoHash = Buffer.from(tuple.infoHashStr, 'hex');
+            this.metadataWaitingQueues.push(tuple);
+        }
+    }
 }
 let parseMetaData = metadataHelper.parseMetaData;
 export { DHTSniffer, parseMetaData };

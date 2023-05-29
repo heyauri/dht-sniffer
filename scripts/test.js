@@ -79,3 +79,25 @@ setInterval(() => {
     // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timestamp + '.heapsnapshot'));
     console.log(Object.values(sniffer.getSizes()).join(" "));
 }, 60 * 1000)
+
+let tmp_fp = path.join(__dirname, "../tmp/arr")
+process.on("SIGINT", () => {
+    let arr = sniffer.exportWaitingQueue();
+    let json = JSON.stringify(arr);
+    if (arr.length > 0) {
+        fs.writeFileSync(tmp_fp, json);
+    }
+    process.exit();
+});
+
+try {
+    if (fs.existsSync(tmp_fp)) {
+        let s = fs.readFileSync(tmp_fp).toString();
+        let arr = JSON.parse(s);
+        sniffer.importWaitingQueue(arr);
+    } else {
+        console.log(tmp_fp, "not exist")
+    }
+} catch (e) {
+    console.error(e);
+}

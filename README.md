@@ -78,6 +78,18 @@ Parse the raw metadata to a object with the following properties:
 }
 ```
 
+### `sniffer.exportUsefulPeers()`
+In real world practice, some peers will only send useless infoHashes, whose metadata can not fetched from the original source. These peers may be also dht-sniffers, so this sniffer mark those peers that sent useful infoHashes as useful peers. Export them and reuse next time can help to speed up next execution of the sniffer.
+
+### `sniffer.importPeer(peer)`
+Import a peer. `peer:{host,port}`
+
+### `sniffer.exportWaitingQueue()`
+Generally, the waiting queue will store many awaiting infoHash after hours of sniffing. However, if the sniffer is aborted, such in-memory data will be lost. Hence, there is a method called `exportWaitingQueue` offered to export these data and make the storage of the data available.
+
+### `sniffer.importWaitingQueue(arr)`
+Import an array of waiting queue.
+
 ## Events
 
 ### `dht.on('infoHash',function(infoHash,peer){ ... })`
