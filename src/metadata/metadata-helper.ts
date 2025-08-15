@@ -1,8 +1,9 @@
-const utils = require("./utils");
+//@ts-nocheck
+const utils = require("../utils");
 const net = require('net');
-const ut_metadata = require('ut_metadata');
-const Protocol = require('bittorrent-protocol');
-const bencode = require("bencode");
+const ut_metadata = require('./ut_metadata');
+import Protocol from '../bittorrent-protocol';
+import bencode from "../bencode";
 const crypto = require('crypto');
 
 export function fetch(target, config) {
@@ -56,7 +57,7 @@ export function fetch(target, config) {
             if (hadError) {
                 reject({ type: "socketError", hadError });
             } else {
-                resolve();
+                resolve(true);
             }
         });
     });

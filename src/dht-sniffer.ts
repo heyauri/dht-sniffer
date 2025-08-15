@@ -1,10 +1,10 @@
 import * as crypto from 'crypto';
-import { DHT } from './dht';
-import * as metadataHelper from './metadata-helper';
+import { DHT } from './dht/dht';
+import * as metadataHelper from './metadata/metadata-helper';
 
 import { EventEmitter } from 'events';
 import * as utils from './utils';
-import * as LRU from "lru-cache";
+import { LRUCache } from "lru-cache";
 
 class DHTSniffer extends EventEmitter {
     private _options: any;
@@ -50,12 +50,12 @@ class DHTSniffer extends EventEmitter {
         this.nodes = [];
         this.nodesDict = {};
         this.metadataFetchingDict = {};
-        this.fetchedTuple = new LRU({ max: this._options.fetchedTupleSize, ttl: 3 * 60 * 60 * 1000 });
-        this.fetchedInfoHash = new LRU({ max: this._options.fetchedInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
-        this.findNodeCache = new LRU({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
-        this.latestCalledPeers = new LRU({ max: 1000, ttl: 5 * 60 * 1000 });
-        this.usefulPeers = new LRU({ max: 5000 });
-        this.metadataFetchingCache = new LRU({ max: 1000, ttl: 20 * 1000 });
+        this.fetchedTuple = new LRUCache({ max: this._options.fetchedTupleSize, ttl: 3 * 60 * 60 * 1000 });
+        this.fetchedInfoHash = new LRUCache({ max: this._options.fetchedInfoHashSize, ttl: 72 * 60 * 60 * 1000 });
+        this.findNodeCache = new LRUCache({ max: this._options.findNodeCacheSize, ttl: 24 * 60 * 60 * 1000, updateAgeOnHas: true });
+        this.latestCalledPeers = new LRUCache({ max: 1000, ttl: 5 * 60 * 1000 });
+        this.usefulPeers = new LRUCache({ max: 5000 });
+        this.metadataFetchingCache = new LRUCache({ max: 1000, ttl: 20 * 1000 });
         let aggressiveLevel = this._options["aggressiveLevel"]
         this.aggressiveLimit = aggressiveLevel && aggressiveLevel > 0 ? aggressiveLevel * this._options["maximumParallelFetchingTorrent"] : 0
         this.counter = {
@@ -349,17 +349,15 @@ class DHTSniffer extends EventEmitter {
             fetchingNum: fetchings.length,
             metadataWaitingQueueSize: this.metadataWaitingQueues.length,
             uniqueWaitingKeys: this.getUniqueWaitingKeys().length,
-            fetchedTupleSize: this.fetchedTuple.keyMap.size,
-            fetchedInfoHashSize: this.fetchedInfoHash.keyMap.size,
+            fetchedTupleSize: this.fetchedTuple.size,
+            fetchedInfoHashSize: this.fetchedInfoHash.size,
             fetchedTupleHit: this.counter.fetchedTupleHit,
             fetchedInfoHashHit: this.counter.fetchedInfoHashHit,
-            metadataFetchingCacheSize: this.metadataFetchingCache.keyMap.size,
+            metadataFetchingCacheSize: this.metadataFetchingCache.size,
             rpcPendingSize: this.rpc.pending.length,
             nodeListSize: this.nodes.length,
             runTime: ((Date.now() - this.startTime) / 1000).toFixed(2)
         }
-        // console.log(fetchings.length, this.metadataWaitingQueues.length, this.fetchedTuple.keyMap.size,
-        // this.fetchedInfoHash.keyMap.size, this.rpc.pending.length);
     }
     reduceRPCPendingArray() {
         let pending = this.rpc.pending.slice(0, 1000);

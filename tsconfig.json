@@ -16,7 +16,7 @@
             "scripthost",
             "ES2015"
         ],
-        "module": "CommonJS",
+        "module": "umd",
         "moduleResolution": "node"
     },
     "include": [

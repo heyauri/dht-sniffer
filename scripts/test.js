@@ -19,7 +19,7 @@ sniffer.on('infoHash', (infoHash, peer) => {
     }
 });
 sniffer.on('node', node => {
-    // console.log('find node', node);
+    console.log('find node', node);
 });
 sniffer.on('warning', err => {
     // console.error(err);
@@ -44,7 +44,7 @@ sniffer.on("metadataError", data => {
     // console.error("fail", data["infoHash"], data["error"]);
 })
 
-let usefulPeerDict = require("../useful-peers.json");
+let usefulPeerDict = fs.existsSync("../useful-peers.json") ? require("../useful-peers.json") : {};
 
 for (let peer of Object.values(usefulPeerDict)) {
     sniffer.importPeer(peer);

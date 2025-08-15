@@ -9,3 +9,4 @@ tors
 .prettierrc
 tmp
 useful-peers.json
+webpack.config.js
