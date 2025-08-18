@@ -36,7 +36,7 @@ export default metadata => {
     }
 
     onHandshake (infoHash, peerId, extensions) {
-      this._infoHash = infoHash
+    this._infoHash = infoHash
     }
 
     onExtendedHandshake (handshake) {

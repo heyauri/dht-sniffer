@@ -322,6 +322,13 @@ export class ErrorMonitor extends EventEmitter {
   }
 
   /**
+   * 获取统计信息
+   */
+  public getStats(): ErrorStats {
+    return this.getCurrentStats();
+  }
+
+  /**
    * 获取错误趋势数据
    */
   public getErrorTrends(hours: number = 24): Array<{ time: number; errorCount: number; errorRate: number }> {
