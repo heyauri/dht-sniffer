@@ -14,7 +14,44 @@ export interface DHTManagerConfig {
   nodesMaxSize: number;
   refreshPeriod: number;
   announcePeriod: number;
+  enhanceBootstrap?: boolean;
+  bootstrapNodes?: Node[];
+  maximumParallelFetchingTorrent?: number;
+  maximumWaitingQueueSize?: number;
+  refreshTime?: number;
+  downloadMaxTime?: number;
+  expandInfoHash?: boolean;
+  fetchedTupleSize?: number;
+  ignoreFetched?: boolean;
+  fetchedInfoHashSize?: number;
+  findNodeCacheSize?: number;
+  aggressiveLevel?: number;
+  maxTables?: number;
+  maxValues?: number;
+  maxPeers?: number;
+  maxAge?: number;
+  timeBucketOutdated?: number;
 }
+
+// 引导节点
+const bootstrapNodes = [
+  // BitTorrent官方节点
+  // { host: 'router.bittorrent.com', port: 6881 },
+  // { host: 'router.utorrent.com', port: 6881 },
+  // { host: 'dht.transmissionbt.com', port: 6881 },
+  // 其他稳定节点
+  { host: 'dht.libtorrent.org', port: 25401 },
+  { host: 'dht.aelitis.com', port: 6881 },
+  { host: 'dht.bittorrent.com', port: 6881 },
+  { host: 'dht.addict.ninja', port: 6881 },
+  { host: 'dht.ccc.de', port: 6881 },
+  { host: 'dht.tbtt.org', port: 6881 },
+
+  // 备用节点
+  { host: 'router.bitcomet.com', port: 6881 },
+  { host: 'dht.vuze.com', port: 6881 },
+  { host: 'dht.trackon.org', port: 6881 },
+];
 
 /**
  * DHT管理器 - 负责管理DHT网络逻辑
@@ -27,19 +64,34 @@ export class DHTManager extends EventEmitter {
   private refreshInterval: NodeJS.Timeout | null;
   private announceInterval: NodeJS.Timeout | null;
   private isRunning: boolean;
-  
+
   constructor(config: DHTManagerConfig, errorHandler: ErrorHandler, peerManager: PeerManager) {
     super();
-    this.config = config;
+    this.config = Object.assign({
+      port: 6881,
+      maximumParallelFetchingTorrent: 40,
+      maximumWaitingQueueSize: -1,
+      refreshTime: 30000,
+      downloadMaxTime: 20000,
+      expandInfoHash: false,
+      fetchedTupleSize: 100000,
+      ignoreFetched: true,
+      fetchedInfoHashSize: 100000,
+      findNodeCacheSize: 100000,
+      aggressiveLevel: 0,
+      bootstrapNodes: bootstrapNodes,
+      enhanceBootstrap: true
+    }, config);
+
     this.errorHandler = errorHandler;
     this.peerManager = peerManager;
-    
+
     this.dht = null;
     this.refreshInterval = null;
     this.announceInterval = null;
     this.isRunning = false;
   }
-  
+
   /**
    * 启动DHT网络
    */
@@ -47,17 +99,17 @@ export class DHTManager extends EventEmitter {
     if (this.isRunning) {
       return;
     }
-    
+
     try {
       // 创建DHT实例
       this.dht = new DHT.DHT(this.config);
-      
+
       // 设置事件监听
       this.setupEventListeners();
-      
+
       // 启动定时任务
       this.startPeriodicTasks();
-      
+
       this.isRunning = true;
       this.emit('started');
     } catch (error) {
@@ -70,7 +122,7 @@ export class DHTManager extends EventEmitter {
       throw networkError;
     }
   }
-  
+
   /**
    * 停止DHT网络
    */
@@ -78,17 +130,17 @@ export class DHTManager extends EventEmitter {
     if (!this.isRunning) {
       return;
     }
-    
+
     try {
       // 清除定时任务
       this.clearPeriodicTasks();
-      
+
       // 停止DHT
       if (this.dht) {
         this.dht.destroy();
         this.dht = null;
       }
-      
+
       this.isRunning = false;
       this.emit('stopped');
     } catch (error) {
@@ -100,31 +152,31 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 设置事件监听器
    */
   private setupEventListeners(): void {
     if (!this.dht) return;
-    
+
     // 监听节点事件
     this.dht.on('node', (node: any) => {
       this.peerManager.addNode(node);
       this.emit('node', node);
     });
-    
+
     // 监听peer事件
     this.dht.on('peer', (peer: any, infoHash: Buffer) => {
       this.peerManager.addPeer({ infoHash, peer });
       this.emit('peer', { infoHash, peer });
     });
-    
+
     // 监听get_peers事件 - 参考原始dht-sniffer实现
     this.dht.on('get_peers', (data: any) => {
       this.peerManager.importPeer(data.peer);
       this.emit('infoHash', { infoHash: data.infoHash, peer: data.peer });
     });
-    
+
     // 监听错误事件
     this.dht.on('error', (error: Error) => {
       const networkError = new NetworkError(
@@ -135,13 +187,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
       this.emit('error', networkError);
     });
-    
+
     // 监听警告事件
     this.dht.on('warning', (warning: string) => {
       this.emit('warning', warning);
     });
   }
-  
+
   /**
    * 启动定时任务
    */
@@ -150,13 +202,13 @@ export class DHTManager extends EventEmitter {
     this.refreshInterval = setInterval(() => {
       this.refreshNodes();
     }, this.config.refreshPeriod);
-    
+
     // 定期announce
     this.announceInterval = setInterval(() => {
       this.announce();
     }, this.config.announcePeriod);
   }
-  
+
   /**
    * 清除定时任务
    */
@@ -165,19 +217,19 @@ export class DHTManager extends EventEmitter {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
-    
+
     if (this.announceInterval) {
       clearInterval(this.announceInterval);
       this.announceInterval = null;
     }
   }
-  
+
   /**
    * 刷新节点
    */
   private refreshNodes(): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.refresh();
       this.emit('refresh');
@@ -190,13 +242,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * Announce
    */
   private announce(): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.announce();
       this.emit('announce');
@@ -209,21 +261,21 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 查找节点 - 参考原始dht-sniffer实现
    */
   findNode(peer: any, nodeId?: Buffer): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       const nodeKey = utils.getPeerKey(peer);
-      
+
       // 获取或生成目标ID
-      const target = nodeId !== undefined 
-        ? utils.getNeighborId(nodeId, this.dht.nodeId) 
+      const target = nodeId !== undefined
+        ? utils.getNeighborId(nodeId, this.dht.nodeId)
         : this.dht.nodeId;
-      
+
       // 创建find_node消息
       const message = {
         t: require('crypto').randomBytes(4),
@@ -234,7 +286,7 @@ export class DHTManager extends EventEmitter {
           target: require('crypto').randomBytes(20)
         }
       };
-      
+
       // 发送查询
       this.dht._rpc.query(peer, message, (err: any, reply: any) => {
         try {
@@ -246,7 +298,7 @@ export class DHTManager extends EventEmitter {
         } catch (e) {
           // do nothing
         }
-        
+
         if (reply && reply.r && reply.r.nodes) {
           const nodes = utils.parseNodes(reply.r.nodes, 20);
           for (const node of nodes) {
@@ -256,7 +308,7 @@ export class DHTManager extends EventEmitter {
           }
         }
       });
-      
+
       this.emit('findNode', peer, target);
     } catch (error) {
       const networkError = new NetworkError(
@@ -267,13 +319,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 查找peers - 对应原始dht的lookup方法
    */
   lookup(infoHash: Buffer, callback?: (err: Error | null, totalNodes?: number) => void): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.lookup(infoHash, (err: Error | null, totalNodes?: number) => {
         if (err) {
@@ -285,12 +337,12 @@ export class DHTManager extends EventEmitter {
           this.errorHandler.handleError(networkError);
           this.emit('error', networkError);
         }
-        
+
         if (callback) {
           callback(err, totalNodes);
         }
       });
-      
+
       this.emit('lookup', infoHash);
     } catch (error) {
       const networkError = new NetworkError(
@@ -301,13 +353,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 获取peer
    */
   getPeers(infoHash: Buffer): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.getPeers(infoHash);
       this.emit('getPeers', infoHash);
@@ -320,43 +372,49 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 导出节点
    */
   exportNodes(): any[] {
     return this.peerManager.exportNodes();
   }
-  
+
   /**
    * 导入节点
    */
   importNodes(nodes: any[]): void {
     this.peerManager.importNodes(nodes);
   }
-  
+
   /**
    * 导出peers
    */
   exportPeers(): any[] {
     return this.peerManager.exportPeers();
   }
-  
+
   /**
    * 导入peers
    */
   importPeers(peers: any[]): void {
     this.peerManager.importPeers(peers);
   }
-  
+
   /**
    * Bootstrap DHT网络
    */
   bootstrap(populate: boolean = true): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht._bootstrap(populate);
+      if (this.config.enhanceBootstrap) {
+        this.config.bootstrapNodes.forEach(node => {
+          this.findNode(node);
+        });
+      }
+
       this.emit('bootstrap', populate);
     } catch (error) {
       const networkError = new NetworkError(
@@ -367,13 +425,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 刷新DHT网络
    */
   refresh(): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.refresh();
       this.emit('refresh');
@@ -386,13 +444,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 添加节点
    */
   addNode(node: any): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.addNode(node);
       this.emit('addNode', node);
@@ -405,13 +463,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 移除节点
    */
   removeNode(nodeId: Buffer): void {
     if (!this.dht || !this.isRunning) return;
-    
+
     try {
       this.dht.removeNode(nodeId);
       this.emit('removeNode', nodeId);
@@ -424,13 +482,13 @@ export class DHTManager extends EventEmitter {
       this.errorHandler.handleError(networkError);
     }
   }
-  
+
   /**
    * 获取统计信息
    */
   getStats() {
     const peerStats = this.peerManager.getStats();
-    
+
     return {
       isRunning: this.isRunning,
       dht: this.dht ? {
@@ -442,27 +500,27 @@ export class DHTManager extends EventEmitter {
       ...peerStats
     };
   }
-  
+
   /**
    * 获取DHT实例
    */
   getDHT(): any {
     return this.dht;
   }
-  
+
   /**
    * 检查是否正在运行
    */
   isDHTRunning(): boolean {
     return this.isRunning;
   }
-  
+
   /**
    * 获取DHT地址信息
    */
   address(): any {
     if (!this.dht || !this.isRunning) return null;
-    
+
     try {
       return this.dht.address();
     } catch (error) {
@@ -475,20 +533,20 @@ export class DHTManager extends EventEmitter {
       return null;
     }
   }
-  
+
   /**
    * 检查DHT是否准备好
    */
   isReady(): boolean {
     return this.dht ? this.dht.ready || false : false;
   }
-  
+
   /**
    * 监听端口
    */
   listen(port?: number, address?: string, callback?: () => void): void {
     if (!this.dht) return;
-    
+
     try {
       if (port && address && callback) {
         this.dht.listen(port, address, callback);

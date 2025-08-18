@@ -15,7 +15,7 @@ sniffer.on('infoHash', (infoHash, peer) => {
     // console.log('get infoHash:', infoHash, peer);
     if (!fs.existsSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`))) {
         sniffer.fetchMetaData(infoHash, peer, true);
-        console.log(Object.values(sniffer.getSizes()).join(" "));
+        console.log(JSON.stringify(sniffer.getStats()));
     }
 });
 sniffer.on('node', node => {
@@ -51,8 +51,8 @@ for (let peer of Object.values(usefulPeerDict)) {
 }
 
 setInterval(() => {
-    console.log(Object.values(sniffer.getSizes()).join(" "));
-    let usefulPeers = sniffer.exportUsefulPeers();
+    console.log(JSON.stringify(sniffer.getStats()));
+    let usefulPeers = sniffer.exportPeers();
     for (let peer of usefulPeers) {
         let peerKey = `${peer.host}:${peer.port}`;
         if (!Reflect.has(usefulPeerDict, peerKey)) {
@@ -77,7 +77,7 @@ setInterval(() => {
 
 setInterval(() => {
     // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timestamp + '.heapsnapshot'));
-    console.log(Object.values(sniffer.getSizes()).join(" "));
+    console.log(JSON.stringify(sniffer.getStats()));
 }, 60 * 1000)
 
 let tmp_fp = path.join(__dirname, "../tmp/arr")

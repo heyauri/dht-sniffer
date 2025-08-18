@@ -102,7 +102,7 @@ export class MetadataManager extends EventEmitter {
     
     // 检查是否已经获取过
     const fetchedTuple = this.cacheManager.getFetchedTuple();
-    const fetchedInfohash = this.cacheManager.getFetchedInfohash();
+    const fetchedInfohash = this.cacheManager.getFetchedInfoHash();
     
     if (this.config.ignoreFetched && fetchedTuple.get(nextFetchingKey)) {
       this.cacheManager.incrementFetchedTupleHit();
@@ -142,7 +142,7 @@ export class MetadataManager extends EventEmitter {
         
         _this.emit('metadata', { infoHash, metadata });
         
-        const fetchedInfohash = _this.cacheManager.getFetchedInfohash();
+        const fetchedInfohash = _this.cacheManager.getFetchedInfoHash();
         const usefulPeers = _this.cacheManager.getUsefulPeers();
         
         fetchedInfohash.set(infoHashStr, 1);

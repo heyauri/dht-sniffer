@@ -2,14 +2,14 @@
 // "bittorrent-protocol": "^4.1.20"
 //@ts-nocheck
 import bencode from '../bencode'
-import BitField from 'bitfield'
-import crypto from 'crypto'
-import Debug from 'debug'
-import RC4 from 'rc4'
+import * as BitField from 'bitfield'
+import * as crypto from 'crypto'
+import * as Debug from 'debug'
+import * as RC4 from 'rc4'
 import { Duplex } from 'streamx'
 import { hash, concat, equal, hex2arr, arr2hex, text2arr, arr2text, randomBytes } from '../uint8-util'
-import throughput from 'throughput'
-import arrayRemove from 'unordered-array-remove'
+import * as throughput from 'throughput'
+import * as arrayRemove from 'unordered-array-remove'
 
 const debug = Debug('bittorrent-protocol')
 

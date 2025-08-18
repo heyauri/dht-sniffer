@@ -36,6 +36,8 @@ export interface DHTOptions {
     maxPeers?: number;
     maxAge?: number;
     timeBucketOutdated?: number;
+    enhanceBootstrap?: boolean;
+    bootstrapNodes?: Node[];
 }
 
 export interface MetadataFetchTarget {
