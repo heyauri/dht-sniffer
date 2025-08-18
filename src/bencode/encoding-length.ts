@@ -1,5 +1,5 @@
 import { text2arr } from '../uint8-util'
-import { digitCount, getType } from './util.js'
+import { digitCount, getType } from './util'
 
 function listLength (list) {
   let length = 1 + 1 // type marker + end-of-type marker

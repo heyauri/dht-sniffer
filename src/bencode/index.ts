@@ -1,6 +1,7 @@
-import encode from './encode.js'
-import decode from './decode.js'
-import byteLength from './encoding-length.js'
+// "bencode": "^4.0.0", 
+import encode from './encode'
+import decode from './decode'
+import byteLength from './encoding-length'
 /**
  * Determines the amount of bytes
  * needed to encode the given value

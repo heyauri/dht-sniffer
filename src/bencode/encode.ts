@@ -1,6 +1,6 @@
 //@ts-nocheck
 import { concat, text2arr } from '../uint8-util'
-import { getType } from './util.js'
+import { getType } from './util'
 
 /**
  * Encodes data in bencode.

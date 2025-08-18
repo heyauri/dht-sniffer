@@ -1,4 +1,5 @@
 /*! bittorrent-protocol. MIT License. WebTorrent LLC <https://webtorrent.io/opensource> */
+// "bittorrent-protocol": "^4.1.20"
 //@ts-nocheck
 import bencode from '../bencode'
 import BitField from 'bitfield'

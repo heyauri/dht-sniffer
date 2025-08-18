@@ -5,6 +5,8 @@ import * as metadataHelper from './metadata/metadata-helper';
 import { EventEmitter } from 'events';
 import * as utils from './utils';
 import { LRUCache } from "lru-cache";
+import { ErrorHandler, NetworkError, TimeoutError, DHTError, MetadataError, ErrorType, ErrorSeverity } from './utils/error-handler';
+import { ErrorMonitor } from './utils/error-monitor';
 
 class DHTSniffer extends EventEmitter {
     private _options: any;
@@ -26,6 +28,8 @@ class DHTSniffer extends EventEmitter {
     nodesDict: Object;
     counter: any;
     aggressiveLimit: number;
+    private errorHandler: ErrorHandler;
+    private errorMonitor: ErrorMonitor;
     constructor(options) {
         super();
         this._options = Object.assign(
@@ -62,6 +66,30 @@ class DHTSniffer extends EventEmitter {
             fetchedTupleHit: 0,
             fetchedInfoHashHit: 0
         }
+        
+        // 初始化错误处理器和监控器
+        this.errorHandler = new ErrorHandler({
+            enableErrorTracking: true,
+            maxErrorHistory: 1000,
+            enableConsoleLog: true,
+            enableStructuredLogging: true
+        });
+        
+        this.errorMonitor = new ErrorMonitor(this.errorHandler, {
+            statsIntervalMs: 60000,
+            maxRecentErrors: 100,
+            enableAlerts: true,
+            alertThresholds: {
+                errorRate: 10,
+                criticalErrors: 5,
+                consecutiveErrors: 20
+            }
+        });
+        
+        // 设置错误监控器的事件监听
+        this.errorMonitor.on('alert', (alert) => {
+            this.emit('errorAlert', alert);
+        });
     }
 
     start() {
@@ -83,8 +111,33 @@ class DHTSniffer extends EventEmitter {
                 ..._this._options
             })
         });
-        this.dht.on('warning', err => _this.emit('warning', err));
-        this.dht.on('error', err => _this.emit('error', err));
+        this.dht.on('warning', err => {
+            const warning = new DHTError(
+                `DHT warning: ${err.message || err}`,
+                { operation: 'dht_operation' },
+                err instanceof Error ? err : new Error(String(err)),
+                true
+            );
+            // 将警告转换为适当的错误实例并处理
+            const warningError = new DHTError(`DHT warning: ${warning}`, {
+                operation: 'dht_warning',
+                component: 'dht',
+                severity: ErrorSeverity.WARNING
+            });
+            this.errorHandler.handleError(warningError);
+            _this.emit('warning', warning);
+        });
+        
+        this.dht.on('error', err => {
+            const error = new DHTError(
+                `DHT error: ${err.message || err}`,
+                { operation: 'dht_operation' },
+                err instanceof Error ? err : new Error(String(err)),
+                false
+            );
+            this.errorHandler.handleError(error);
+            _this.emit('error', error);
+        });
 
         /**
          *  emit data like {infoHash, peer: { host: '123.123.123.123', family: 'IPv4', port: 6882, size: 104 }}
@@ -154,6 +207,17 @@ class DHTSniffer extends EventEmitter {
         const _this = this;
         this.dht.destroy(() => {
             clearInterval(_this.refreshIntervalId);
+            
+            // 停止错误监控器
+            if (this.errorMonitor) {
+                this.errorMonitor.stop();
+            }
+            
+            // 清理错误处理器
+            if (this.errorHandler) {
+                this.errorHandler.clearHistory();
+            }
+            
             _this.status = false;
             _this.emit("stop")
         });
@@ -213,7 +277,13 @@ class DHTSniffer extends EventEmitter {
             // console.log("try lookup", infoHash.toString("hex"));
             this.dht.lookup(infoHash, function (err, totalNodes) {
                 if (err) {
-                    _this.emit("error", err);
+                    const error = new DHTError(
+                        `DHT lookup failed for ${infoHash.toString('hex')}: ${err.message || err}`,
+                        { operation: 'dht_lookup', infoHash: infoHash.toString('hex') },
+                        err instanceof Error ? err : new Error(String(err))
+                    );
+                    _this.errorHandler.handleError(error);
+                    _this.emit("error", error);
                 }
                 else {
                     // console.log("total nodes", totalNodes)
@@ -306,6 +376,22 @@ class DHTSniffer extends EventEmitter {
                     _this.removeDuplicatedWaitingObjects(infoHashStr)
                 }
             }).catch(error => {
+                // 使用错误处理器处理metadata获取错误
+                if (error instanceof NetworkError || error instanceof TimeoutError || error instanceof MetadataError) {
+                    _this.errorHandler.handleError(error);
+                } else {
+                    const metadataError = new MetadataError(
+                        `Metadata fetch failed for ${infoHashStr}: ${error.message || error}`,
+                        { 
+                            operation: 'metadata_fetch', 
+                            infoHash: infoHashStr, 
+                            peer: { host: peer.host, port: peer.port } 
+                        },
+                        error instanceof Error ? error : new Error(String(error))
+                    );
+                    _this.errorHandler.handleError(metadataError);
+                    error = metadataError;
+                }
                 _this.emit('metadataError', {
                     infoHash,
                     error

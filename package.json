@@ -4,7 +4,7 @@
     "description": "A dht sniffer based on node.js",
     "main": "lib/dht-sniffer.js",
     "scripts": {
-        "build": "webpack",
+        "build": "tsc",
         "test": "tsc & node scripts/test.js",
         "prd": "pm2 start scripts/test.js --name dht --max-memory-restart 1000M",
         "stat": "node scripts/statistic.js"
@@ -28,23 +28,24 @@
     "homepage": "https://github.com/heyauri/dht-sniffer#readme",
     "devDependencies": {
         "@types/node": "^18.11.18",
-        "buffer": "^6.0.3",
-        "process": "^0.11.10",
         "ts-loader": "^9.5.2",
         "webpack": "^5.101.2",
         "webpack-cli": "^6.0.1"
     },
     "dependencies": {
-        "bencode": "^4.0.0",
-        "bittorrent-protocol": "^4.1.20",
+        "bitfield": "^4.2.0",
         "debug": "^4.4.1",
         "k-bucket": "^5.1.0",
         "k-rpc": "^5.1.0",
         "last-one-wins": "^1.0.4",
         "lru-cache": "^11.1.0",
         "randombytes": "^2.1.0",
+        "rc4": "^0.1.5",
         "record-cache": "^1.2.0",
         "simple-sha1": "^3.1.0",
+        "streamx": "^2.22.1",
+        "throughput": "^1.0.2",
+        "unordered-array-remove": "^1.0.2",
         "ut_metadata": "^4.0.3"
     }
 }

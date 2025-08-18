@@ -5,6 +5,7 @@ const ut_metadata = require('./ut_metadata');
 import Protocol from '../bittorrent-protocol';
 import bencode from "../bencode";
 const crypto = require('crypto');
+import { NetworkError, TimeoutError, MetadataError, ErrorType, ErrorSeverity } from '../utils/error-handler';
 
 export function fetch(target, config) {
     return new Promise((resolve, reject) => {
@@ -31,7 +32,15 @@ export function fetch(target, config) {
             // optionally, listen to the 'warning' event if you want to know that metadata is
             // probably not going to arrive for one of the above reasons.
             wire.ut_metadata.on('warning', err => {
-                reject({ type: "metadataWarning", err });
+                reject(new MetadataError(
+                    `Metadata warning: ${err.message || err}`,
+                    {
+                        operation: 'metadata_fetch',
+                        peer: { host: peer.host, port: peer.port },
+                        infoHash: infoHash.toString('hex')
+                    },
+                    err instanceof Error ? err : new Error(String(err))
+                ));
                 wire.destroy();
             })
 
@@ -44,18 +53,43 @@ export function fetch(target, config) {
 
         socket.on('error', function (err) {
             socket.destroy();
-            reject({ type: "socketError", err });
+            reject(new NetworkError(
+                `Socket error: ${err.message || err}`,
+                {
+                    operation: 'socket_connect',
+                    peer: { host: peer.host, port: peer.port },
+                    infoHash: infoHash.toString('hex')
+                },
+                err instanceof Error ? err : new Error(String(err))
+            ));
         });
 
         socket.on('timeout', function (err) {
             socket.destroy();
-            reject({ type: "timeout", err });
+            reject(new TimeoutError(
+                `Connection timeout to ${peer.host}:${peer.port}`,
+                {
+                    operation: 'socket_connect',
+                    peer: { host: peer.host, port: peer.port },
+                    infoHash: infoHash.toString('hex'),
+                    timeoutMs: config.downloadMaxTime || 30000
+                },
+                err instanceof Error ? err : new Error(String(err))
+            ));
         });
 
         socket.once('close', function (hadError) {
             //ignore
             if (hadError) {
-                reject({ type: "socketError", hadError });
+                reject(new NetworkError(
+                    'Socket closed with error',
+                    {
+                        operation: 'socket_close',
+                        peer: { host: peer.host, port: peer.port },
+                        infoHash: infoHash.toString('hex'),
+                        hadError: true
+                    }
+                ));
             } else {
                 resolve(true);
             }
