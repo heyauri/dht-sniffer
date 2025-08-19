@@ -17,11 +17,10 @@ export interface Node extends Peer {
     seen?: number;
 }
 
-export interface DHTOptions {
+// 基础DHT配置接口
+export interface BaseDHTConfig {
     port?: number;
     refreshTime?: number;
-    maximumParallelFetchingTorrent?: number;
-    maximumWaitingQueueSize?: number;
     downloadMaxTime?: number;
     expandNodes?: boolean;
     ignoreFetched?: boolean;
@@ -30,14 +29,19 @@ export interface DHTOptions {
     fetchedInfoHashSize?: number;
     findNodeCacheSize?: number;
     aggressiveLevel?: number;
+    enhanceBootstrap?: boolean;
+    bootstrapNodes?: Node[];
+}
+
+export interface DHTOptions extends BaseDHTConfig {
+    maximumParallelFetchingTorrent?: number;
+    maximumWaitingQueueSize?: number;
     bootstrap?: boolean | string[];
     maxTables?: number;
     maxValues?: number;
     maxPeers?: number;
     maxAge?: number;
     timeBucketOutdated?: number;
-    enhanceBootstrap?: boolean;
-    bootstrapNodes?: Node[];
 }
 
 export interface MetadataFetchTarget {
@@ -79,19 +83,7 @@ export interface MetadataError {
     retryCount?: number;
 }
 
-export interface Sizes {
-    fetchingNum: number;
-    metadataWaitingQueueSize: number;
-    uniqueWaitingKeys: number;
-    fetchedTupleSize: number;
-    fetchedInfoHashSize: number;
-    fetchedTupleHit: number;
-    fetchedInfoHashHit: number;
-    metadataFetchingCacheSize: number;
-    rpcPendingSize: number;
-    nodeListSize: number;
-    runTime: string;
-}
+
 
 export interface WaitingQueueItem {
     infoHash: Buffer;
@@ -99,10 +91,7 @@ export interface WaitingQueueItem {
     infoHashStr: string;
 }
 
-export interface Counter {
-    fetchedTupleHit: number;
-    fetchedInfoHashHit: number;
-}
+
 
 export interface DHTMessage {
     t: Buffer;
@@ -120,7 +109,7 @@ export interface DHTReply {
     };
 }
 
-export interface StartEvent {
+export interface StartEvent extends BaseDHTConfig {
     startTime: number;
     port: number;
     refreshTime: number;
@@ -151,7 +140,7 @@ export interface SocketError {
     operation?: 'connect' | 'read' | 'write';
 }
 
-export interface TimeoutError {
+export interface TimeoutErrorInfo {
     type: 'timeout';
     err?: Error | string;
     operation?: string;
@@ -159,7 +148,7 @@ export interface TimeoutError {
     peer?: Peer;
 }
 
-export type FetchError = MetadataWarning | SocketError | TimeoutError;
+export type FetchError = MetadataWarning | SocketError | TimeoutErrorInfo;
 
 // 错误处理相关类型
 export interface ErrorStats {

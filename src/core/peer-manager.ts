@@ -1,18 +1,7 @@
 import { EventEmitter } from 'events';
 import { LRUCache } from 'lru-cache';
 import * as utils from '../utils';
-
-/**
- * Peer接口
- */
-export interface Peer {
-  host: string;
-  port: number;
-  family?: string;
-  id?: Buffer;
-  distance?: number;
-  token?: any;
-}
+import { Peer } from '../types';
 
 /**
  * Peer管理器配置

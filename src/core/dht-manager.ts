@@ -3,61 +3,48 @@ import * as DHT from '../dht/dht';
 import * as utils from '../utils';
 import { NetworkError, ErrorHandler } from '../utils/error-handler';
 import { PeerManager } from './peer-manager';
+import { DHTOptions, Node } from '../types';
 
 /**
  * DHT管理器配置
  */
 export interface DHTManagerConfig {
   address: string;
-  port: number;
-  bootstrap?: string[];
+  port?: number;
+  bootstrap?: boolean | string[];
   nodesMaxSize: number;
   refreshPeriod: number;
   announcePeriod: number;
-  enhanceBootstrap?: boolean;
-  bootstrapNodes?: Node[];
-  maximumParallelFetchingTorrent?: number;
-  maximumWaitingQueueSize?: number;
-  refreshTime?: number;
-  downloadMaxTime?: number;
-  expandInfoHash?: boolean;
-  fetchedTupleSize?: number;
-  ignoreFetched?: boolean;
-  fetchedInfoHashSize?: number;
-  findNodeCacheSize?: number;
-  aggressiveLevel?: number;
-  maxTables?: number;
-  maxValues?: number;
-  maxPeers?: number;
-  maxAge?: number;
-  timeBucketOutdated?: number;
 }
 
+// DHTManagerConfig扩展了DHTOptions以包含所有DHT相关配置
+export interface DHTManagerExtendedConfig extends DHTManagerConfig, Omit<DHTOptions, 'bootstrap'> {}
+
 // 引导节点
-const bootstrapNodes = [
+const bootstrapNodes: Node[] = [
   // BitTorrent官方节点
-  // { host: 'router.bittorrent.com', port: 6881 },
-  // { host: 'router.utorrent.com', port: 6881 },
-  // { host: 'dht.transmissionbt.com', port: 6881 },
+  // { host: 'router.bittorrent.com', port: 6881, id: Buffer.alloc(20) },
+  // { host: 'router.utorrent.com', port: 6881, id: Buffer.alloc(20) },
+  // { host: 'dht.transmissionbt.com', port: 6881, id: Buffer.alloc(20) },
   // 其他稳定节点
-  { host: 'dht.libtorrent.org', port: 25401 },
-  { host: 'dht.aelitis.com', port: 6881 },
-  { host: 'dht.bittorrent.com', port: 6881 },
-  { host: 'dht.addict.ninja', port: 6881 },
-  { host: 'dht.ccc.de', port: 6881 },
-  { host: 'dht.tbtt.org', port: 6881 },
+  { host: 'dht.libtorrent.org', port: 25401, id: Buffer.alloc(20) },
+  { host: 'dht.aelitis.com', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.bittorrent.com', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.addict.ninja', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.ccc.de', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.tbtt.org', port: 6881, id: Buffer.alloc(20) },
 
   // 备用节点
-  { host: 'router.bitcomet.com', port: 6881 },
-  { host: 'dht.vuze.com', port: 6881 },
-  { host: 'dht.trackon.org', port: 6881 },
+  { host: 'router.bitcomet.com', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.vuze.com', port: 6881, id: Buffer.alloc(20) },
+  { host: 'dht.trackon.org', port: 6881, id: Buffer.alloc(20) },
 ];
 
 /**
  * DHT管理器 - 负责管理DHT网络逻辑
  */
 export class DHTManager extends EventEmitter {
-  private config: DHTManagerConfig;
+  private config: DHTManagerExtendedConfig;
   private errorHandler: ErrorHandler;
   private peerManager: PeerManager;
   private dht: any;
@@ -69,18 +56,7 @@ export class DHTManager extends EventEmitter {
     super();
     this.config = Object.assign({
       port: 6881,
-      maximumParallelFetchingTorrent: 40,
-      maximumWaitingQueueSize: -1,
-      refreshTime: 30000,
-      downloadMaxTime: 20000,
-      expandInfoHash: false,
-      fetchedTupleSize: 100000,
-      ignoreFetched: true,
-      fetchedInfoHashSize: 100000,
-      findNodeCacheSize: 100000,
-      aggressiveLevel: 0,
-      bootstrapNodes: bootstrapNodes,
-      enhanceBootstrap: true
+      bootstrapNodes: bootstrapNodes
     }, config);
 
     this.errorHandler = errorHandler;

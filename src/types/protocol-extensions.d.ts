@@ -1,6 +1,13 @@
 import { EventEmitter } from 'events';
 import { Duplex } from 'streamx';
 
+// 基础事件接口
+export interface BaseProtocolEvents {
+    metadata: [metadata: Buffer];
+    warning: [err: Error];
+    handshake: [infoHash: Buffer, peerId: Buffer];
+}
+
 // 扩展bittorrent-protocol的Protocol类
 declare module '../bittorrent-protocol' {
     interface Protocol {
@@ -11,9 +18,7 @@ declare module '../bittorrent-protocol' {
         extended(ext: string | number, obj: any): void;
         
         // 扩展事件监听器
-        on(event: 'metadata', listener: (metadata: Buffer) => void): this;
-        on(event: 'warning', listener: (err: Error) => void): this;
-        on(event: 'handshake', listener: (infoHash: Buffer, peerId: Buffer) => void): this;
+        on<K extends keyof BaseProtocolEvents>(event: K, listener: (...args: BaseProtocolEvents[K]) => void): this;
         
         // 保留原有的事件监听器
         on(event: string, listener: (...args: any[]) => void): this;
@@ -23,26 +28,12 @@ declare module '../bittorrent-protocol' {
 // ut_metadata扩展接口
 export interface UtMetadataExtension {
     // 事件
-    on(event: 'metadata', listener: (metadata: Buffer) => void): this;
-    on(event: 'warning', listener: (err: Error) => void): this;
+    on<K extends keyof BaseProtocolEvents>(event: K, listener: (...args: BaseProtocolEvents[K]) => void): this;
     
     // 方法
     fetch(): void;
     cancel(): void;
     setMetadata(metadata: Buffer): Promise<boolean>;
-}
-
-// 扩展EventEmitter类型以支持ut_metadata事件
-export interface UtMetadataEvents {
-    metadata: [metadata: Buffer];
-    warning: [err: Error];
-}
-
-// 扩展Protocol事件类型
-export interface ProtocolEvents {
-    metadata: [metadata: Buffer];
-    warning: [err: Error];
-    handshake: [infoHash: Buffer, peerId: Buffer];
 }
 
 // 扩展Wire类（如果需要）
@@ -51,9 +42,7 @@ export interface ExtendedWire extends Duplex {
     extended(ext: string | number, obj: any): void;
     
     // 事件监听器
-    on(event: 'metadata', listener: (metadata: Buffer) => void): this;
-    on(event: 'warning', listener: (err: Error) => void): this;
-    on(event: 'handshake', listener: (infoHash: Buffer, peerId: Buffer) => void): this;
+    on<K extends keyof BaseProtocolEvents>(event: K, listener: (...args: BaseProtocolEvents[K]) => void): this;
     
     // 保留原有的事件监听器
     on(event: string, listener: (...args: any[]) => void): this;
@@ -76,13 +65,6 @@ declare module './ut_metadata' {
     export default ut_metadata;
 }
 
-// 用于metadata-helper.ts的类型定义
-export interface MetadataWireEvents {
-    metadata: [metadata: Buffer];
-    warning: [err: Error];
-    handshake: [infoHash: Buffer, peerId: Buffer];
-}
-
 // 扩展Protocol类以支持动态属性
 export interface ProtocolWithExtensions {
     // 原有属性（这些属性在wire类中实际存在）
@@ -103,9 +85,7 @@ export interface ProtocolWithExtensions {
     extended(ext: string | number, obj: any): void;
     
     // 事件监听器
-    on(event: 'metadata', listener: (metadata: Buffer) => void): this;
-    on(event: 'warning', listener: (err: Error) => void): this;
-    on(event: 'handshake', listener: (infoHash: Buffer, peerId: Buffer) => void): this;
+    on<K extends keyof BaseProtocolEvents>(event: K, listener: (...args: BaseProtocolEvents[K]) => void): this;
     
     // 保留原有的事件监听器
     on(event: string, listener: (...args: any[]) => void): this;
