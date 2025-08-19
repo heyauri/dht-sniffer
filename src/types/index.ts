@@ -182,6 +182,80 @@ export interface ErrorTrend {
     errorRate: number;
 }
 
+// 统一事件类型定义
+export interface dhtevent {
+  type: 'node' | 'peer' | 'infohash' | 'error' | 'warning' | 'started' | 'stopped' | 'metadata' | 'metadataerror';
+  timestamp: number;
+  data: any;
+}
+
+export interface nodeevent extends dhtevent {
+  type: 'node';
+  data: {
+    node: Node;
+  };
+}
+
+export interface peerevent extends dhtevent {
+  type: 'peer';
+  data: {
+    peer: Peer;
+    infohash: Buffer;
+  };
+}
+
+export interface infohashevent extends dhtevent {
+  type: 'infohash';
+  data: {
+    infohash: Buffer;
+    peer: Peer;
+  };
+}
+
+export interface errorevent extends dhtevent {
+  type: 'error';
+  data: {
+    error: Error;
+    source?: string;
+  };
+}
+
+export interface warningevent extends dhtevent {
+  type: 'warning';
+  data: {
+    message: string;
+    source?: string;
+  };
+}
+
+export interface statusevent extends dhtevent {
+  type: 'started' | 'stopped';
+  data: {
+    timestamp: number;
+    status: 'started' | 'stopped';
+  };
+}
+
+export interface metadataevent extends dhtevent {
+  type: 'metadata';
+  data: {
+    infohash: Buffer;
+    metadata: ParsedMetadata;
+  };
+}
+
+export interface metadataerrorevent extends dhtevent {
+  type: 'metadataerror';
+  data: {
+    infohash: Buffer;
+    error: Error | string;
+    peer?: Peer;
+    retrycount?: number;
+  };
+}
+
+export type dhteventtype = nodeevent | peerevent | infohashevent | errorevent | warningevent | statusevent | metadataevent | metadataerrorevent;
+
 // 导出错误处理和监控模块
 export * from '../utils/error-handler';
 export { ErrorMonitor, ErrorMonitorConfig } from '../utils/error-monitor';

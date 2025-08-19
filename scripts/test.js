@@ -5,7 +5,15 @@ const path = require("path");
 
 let sniffer = new DHTSniffer(
     {
-        port: 6881, maximumParallelFetchingTorrent: 40, maximumWaitingQueueSize: -1, refreshTime: 30000, downloadMaxTime: 20000, expandInfoHash: false, fetchedTupleSize: 100000, ignoreFetched: true, fetchedInfoHashSize: 100000, findNodeCacheSize: 100000, aggressiveLevel: 0
+        port: 6881, 
+        nodesMaxSize: 10000,
+        refreshPeriod: 30000,
+        announcePeriod: 30000,
+        maximumParallelFetchingTorrent: 40, 
+        maximumWaitingQueueSize: -1, 
+        downloadMaxTime: 20000, 
+        ignoreFetched: true, 
+        aggressiveLevel: 0
     });
 sniffer.start();
 sniffer.on("start", infos => {

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import * as DHT from '../dht/dht';
 import * as utils from '../utils';
-import { NetworkError, ErrorHandler } from '../utils/error-handler';
+import { NetworkError, ErrorHandler, ValidationError } from '../utils/error-handler';
 import { PeerManager } from './peer-manager';
 import { DHTOptions, Node } from '../types';
 
@@ -9,12 +9,62 @@ import { DHTOptions, Node } from '../types';
  * DHT管理器配置
  */
 export interface DHTManagerConfig {
-  address: string;
+  address?: string;
   port?: number;
   bootstrap?: boolean | string[];
   nodesMaxSize: number;
   refreshPeriod: number;
   announcePeriod: number;
+}
+
+/**
+ * 验证DHT管理器配置
+ * @param config 要验证的配置
+ * @throws ValidationError 当配置无效时抛出
+ */
+function validateConfig(config: DHTManagerConfig): void {
+  // 验证address（如果提供）
+  if (config.address !== undefined && (typeof config.address !== 'string' || config.address.trim() === '')) {
+    throw new ValidationError('address must be a non-empty string if provided', { field: 'address', value: config.address });
+  }
+
+  // 验证port
+  if (config.port !== undefined) {
+    if (typeof config.port !== 'number' || config.port < 1 || config.port > 65535) {
+      throw new ValidationError('port must be a number between 1 and 65535', { field: 'port', value: config.port });
+    }
+  }
+
+  // 验证nodesMaxSize
+  if (typeof config.nodesMaxSize !== 'number' || config.nodesMaxSize < 1) {
+    throw new ValidationError('nodesMaxSize must be a positive number', { field: 'nodesMaxSize', value: config.nodesMaxSize });
+  }
+
+  // 验证refreshPeriod
+  if (typeof config.refreshPeriod !== 'number' || config.refreshPeriod < 1000) {
+    throw new ValidationError('refreshPeriod must be at least 1000ms', { field: 'refreshPeriod', value: config.refreshPeriod });
+  }
+
+  // 验证announcePeriod
+  if (typeof config.announcePeriod !== 'number' || config.announcePeriod < 1000) {
+    throw new ValidationError('announcePeriod must be at least 1000ms', { field: 'announcePeriod', value: config.announcePeriod });
+  }
+
+  // 验证bootstrap
+  if (config.bootstrap !== undefined) {
+    if (typeof config.bootstrap !== 'boolean' && !Array.isArray(config.bootstrap)) {
+      throw new ValidationError('bootstrap must be a boolean or string array', { field: 'bootstrap', value: config.bootstrap });
+    }
+    
+    if (Array.isArray(config.bootstrap)) {
+      for (let i = 0; i < config.bootstrap.length; i++) {
+        const node = config.bootstrap[i];
+        if (typeof node !== 'string') {
+          throw new ValidationError(`bootstrap[${i}] must be a string`, { field: `bootstrap[${i}]`, value: node });
+        }
+      }
+    }
+  }
 }
 
 // DHTManagerConfig扩展了DHTOptions以包含所有DHT相关配置
@@ -54,13 +104,27 @@ export class DHTManager extends EventEmitter {
 
   constructor(config: DHTManagerConfig, errorHandler: ErrorHandler, peerManager: PeerManager) {
     super();
+    
+    // 首先初始化errorHandler
+    this.errorHandler = errorHandler;
+    this.peerManager = peerManager;
+    
+    // 验证配置
+    try {
+      validateConfig(config);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        this.errorHandler.handleError(error);
+        throw error;
+      }
+      throw error;
+    }
+    
     this.config = Object.assign({
+      address: '0.0.0.0',
       port: 6881,
       bootstrapNodes: bootstrapNodes
     }, config);
-
-    this.errorHandler = errorHandler;
-    this.peerManager = peerManager;
 
     this.dht = null;
     this.refreshInterval = null;

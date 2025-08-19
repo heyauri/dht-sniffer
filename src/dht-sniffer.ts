@@ -12,17 +12,17 @@ import { DHTManager, DHTManagerConfig } from './core/dht-manager';
  * DHT嗅探器配置
  */
 export interface DHTSnifferConfig {
-  address: string;
-  port: number;
+  address?: string;
+  port?: number;
   bootstrap?: string[];
-  nodesMaxSize: number;
-  refreshPeriod: number;
-  announcePeriod: number;
-  maximumParallelFetchingTorrent: number;
-  maximumWaitingQueueSize: number;
-  downloadMaxTime: number;
-  ignoreFetched: boolean;
-  aggressiveLevel: number;
+  nodesMaxSize?: number;
+  refreshPeriod?: number;
+  announcePeriod?: number;
+  maximumParallelFetchingTorrent?: number;
+  maximumWaitingQueueSize?: number;
+  downloadMaxTime?: number;
+  ignoreFetched?: boolean;
+  aggressiveLevel?: number;
   errorHandler?: ErrorHandler;
   errorMonitor?: ErrorMonitor;
   errorMonitorConfig?: ErrorMonitorConfig;
@@ -43,10 +43,22 @@ export class DHTSniffer extends EventEmitter {
   private dhtManager: DHTManager;
   private isRunning: boolean;
 
-  constructor(config: DHTSnifferConfig) {
+  constructor(config: DHTSnifferConfig = {}) {
     super();
 
-    this.config = config;
+    // 设置默认配置
+    this.config = Object.assign({
+      port: 6881,
+      nodesMaxSize: 10000,
+      refreshPeriod: 30000,
+      announcePeriod: 30000,
+      maximumParallelFetchingTorrent: 40,
+      maximumWaitingQueueSize: -1,
+      downloadMaxTime: 20000,
+      ignoreFetched: true,
+      aggressiveLevel: 0
+    }, config);
+    
     this.isRunning = false;
 
     // 初始化错误处理器
@@ -83,8 +95,8 @@ export class DHTSniffer extends EventEmitter {
     // 初始化节点管理器
     this.peerManager = new PeerManager(
       {
-        maxNodes: config.nodesMaxSize,
-        nodeRefreshTime: config.refreshPeriod,
+        maxNodes: this.config.nodesMaxSize!,
+        nodeRefreshTime: this.config.refreshPeriod!,
         findNodeProbability: 0.1
       },
       null, // DHT实例将在DHTManager启动后设置
@@ -94,26 +106,32 @@ export class DHTSniffer extends EventEmitter {
     // 初始化元数据管理器
     this.metadataManager = new MetadataManager(
       {
-        maximumParallelFetchingTorrent: config.maximumParallelFetchingTorrent,
-        maximumWaitingQueueSize: config.maximumWaitingQueueSize,
-        downloadMaxTime: config.downloadMaxTime,
-        ignoreFetched: config.ignoreFetched,
-        aggressiveLevel: config.aggressiveLevel
+        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent!,
+        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize!,
+        downloadMaxTime: this.config.downloadMaxTime!,
+        ignoreFetched: this.config.ignoreFetched!,
+        aggressiveLevel: this.config.aggressiveLevel!
       },
       this.errorHandler,
       this.cacheManager
     );
 
     // 初始化DHT管理器
+    const dhtConfig: DHTManagerConfig = {
+      port: this.config.port!,
+      bootstrap: this.config.bootstrap,
+      nodesMaxSize: this.config.nodesMaxSize!,
+      refreshPeriod: this.config.refreshPeriod!,
+      announcePeriod: this.config.announcePeriod!
+    };
+    
+    // 只有在提供了address时才添加
+    if (this.config.address !== undefined) {
+      dhtConfig.address = this.config.address;
+    }
+    
     this.dhtManager = new DHTManager(
-      {
-        address: config.address,
-        port: config.port,
-        bootstrap: config.bootstrap,
-        nodesMaxSize: config.nodesMaxSize,
-        refreshPeriod: config.refreshPeriod,
-        announcePeriod: config.announcePeriod
-      },
+      dhtConfig,
       this.errorHandler,
       this.peerManager
     );
