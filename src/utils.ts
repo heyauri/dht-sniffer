@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+import * as crypto from 'crypto';
 
 export function getRandomId() {
     return crypto.createHash('sha1').update(crypto.randomBytes(20)).digest();

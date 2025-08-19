@@ -1,16 +1,17 @@
 import { EventEmitter } from 'events';
-import { AppError, ErrorType, ErrorSeverity, ErrorHandler, ErrorRecord } from './error-handler';
+import { AppError, ErrorHandler, ErrorType, ErrorSeverity, ErrorStats, ErrorReport } from '../types/error';
+import { ErrorRecord, RecoveryOptions, RecoveryResult } from './error-types';
+import { LoggerConfig } from '../types/config';
 import { LRUCache } from 'lru-cache';
 
-/**
- * 错误统计信息接口
- */
-export interface ErrorStats {
-  totalErrors: number;
-  errorsByType: Record<string, number>;
-  errorsBySeverity: Record<string, number>;
-  recentErrors: ErrorRecord[];
-  errorRates: Record<string, number>;
+// 扩展ErrorStats接口以包含监控所需的额外属性
+interface ExtendedErrorStats extends ErrorStats {
+  errorRates: {
+    '1m': number;
+    '5m': number;
+    '15m': number;
+    '1h': number;
+  };
   recoveryStats: {
     totalAttempts: number;
     successfulRecoveries: number;
@@ -22,51 +23,41 @@ export interface ErrorStats {
     start: number;
     end: number;
   };
+  lastError: ExtendedAppError | null;
+  firstError: ExtendedAppError | null;
 }
 
-/**
- * 错误趋势接口
- */
-export interface ErrorTrend {
-  timestamp: number;
-  count: number;
-  errorsByType: Record<string, number>;
-  errorsBySeverity: Record<string, number>;
-}
-
-/**
- * 错误类型统计接口
- */
-export interface ErrorTypeStats {
-  type: string;
-  totalCount: number;
-  recentCount: number;
-  averageSeverity: number;
-  recoverableCount: number;
-  lastOccurrence: number;
-  firstOccurrence: number;
-}
-
-/**
- * 错误监控配置
- */
+// 错误监控配置接口
 export interface ErrorMonitorConfig {
   statsIntervalMs: number;
   maxRecentErrors: number;
   errorRateWindowMs: number;
   enableAlerts: boolean;
   alertThresholds: {
-    errorRate: number; // 每分钟错误数阈值
-    criticalErrors: number; // 严重错误数阈值
-    consecutiveErrors: number; // 连续错误数阈值
+    errorRate: number;
+    criticalErrors: number;
+    consecutiveErrors: number;
   };
 }
+
+// 扩展AppError接口以包含所需的属性
+interface ExtendedAppError extends AppError {
+  errorId: string;
+  timestamp: number;
+}
+
+// 扩展ErrorHandler接口以包含EventEmitter功能
+interface ErrorHandlerWithEvents extends ErrorHandler, EventEmitter {
+  on(event: string, listener: (...args: any[]) => void): this;
+  emit(event: string, ...args: any[]): boolean;
+}
+
 
 /**
  * 错误监控器类
  */
 export class ErrorMonitor extends EventEmitter {
-  private errorHandler: ErrorHandler;
+  private errorHandler: ErrorHandlerWithEvents;
   private config: ErrorMonitorConfig;
   private statsInterval: NodeJS.Timeout | null = null;
   private errorTimestamps: number[] = [];
@@ -76,12 +67,12 @@ export class ErrorMonitor extends EventEmitter {
   private totalErrors = 0;
   private errorsByType: Record<ErrorType, number> = this.initErrorCount();
   private errorsBySeverity: Record<ErrorSeverity, number> = this.initSeverityCount();
-  private recentErrors: AppError[] = [];
+  private recentErrors: ExtendedAppError[] = [];
   private peakErrorTime: number | null = null;
   private peakErrorCount = 0;
 
   constructor(
-    errorHandler: ErrorHandler,
+    errorHandler: ErrorHandlerWithEvents,
     config: Partial<ErrorMonitorConfig> = {}
   ) {
     super();
@@ -129,11 +120,11 @@ export class ErrorMonitor extends EventEmitter {
    * 设置错误监听器
    */
   private setupErrorListeners(): void {
-    this.errorHandler.on('error', (error: AppError) => {
+    this.errorHandler.on('error', (error: ExtendedAppError) => {
       this.recordError(error);
     });
 
-    this.errorHandler.on('critical', (error: AppError) => {
+    this.errorHandler.on('critical', (error: ExtendedAppError) => {
       this.recordError(error);
       this.checkCriticalErrorThreshold();
     });
@@ -150,7 +141,7 @@ export class ErrorMonitor extends EventEmitter {
   /**
    * 记录错误
    */
-  private recordError(error: AppError): void {
+  private recordError(error: ExtendedAppError): void {
     const now = Date.now();
     
     // 更新总错误数
@@ -269,7 +260,7 @@ export class ErrorMonitor extends EventEmitter {
   /**
    * 获取当前统计信息
    */
-  public getCurrentStats(): ErrorStats {
+  public getCurrentStats(): ExtendedErrorStats {
     const now = Date.now();
     const windowStart = now - this.config.errorRateWindowMs;
     const recentErrors = this.errorTimestamps.filter(timestamp => timestamp > windowStart);
@@ -289,13 +280,13 @@ export class ErrorMonitor extends EventEmitter {
       recoveryRate: this.consecutiveErrorCount === 0 ? 1 : 0
     };
     
-    // 将AppError转换为ErrorRecord
+    // 将ExtendedAppError转换为ErrorRecord
     const recentErrorRecords: ErrorRecord[] = this.recentErrors.map(error => ({
-      id: error.errorId,
+      id: error.errorId || '',
       type: error.type,
       message: error.message,
       severity: error.severity,
-      timestamp: error.timestamp,
+      timestamp: error.timestamp || Date.now(),
       context: error.context,
       recoverable: error.recoverable,
       retryCount: 0
@@ -305,7 +296,7 @@ export class ErrorMonitor extends EventEmitter {
       totalErrors: this.totalErrors,
       errorsByType: { ...this.errorsByType },
       errorsBySeverity: { ...this.errorsBySeverity },
-      recentErrors: recentErrorRecords,
+      recentErrors: recentErrorRecords as any,
       errorRates: {
         '1m': errorRate,
         '5m': (this.errorTimestamps.filter(timestamp => timestamp > now - 300000).length / 300000) * 60000,
@@ -317,14 +308,16 @@ export class ErrorMonitor extends EventEmitter {
       timeRange: {
         start: this.errorTimestamps.length > 0 ? Math.min(...this.errorTimestamps) : now,
         end: now
-      }
+      },
+      lastError: this.recentErrors.length > 0 ? this.recentErrors[this.recentErrors.length - 1] : null,
+      firstError: this.recentErrors.length > 0 ? this.recentErrors[0] : null
     };
   }
 
   /**
    * 获取统计信息
    */
-  public getStats(): ErrorStats {
+  public getStats(): ExtendedErrorStats {
     return this.getCurrentStats();
   }
 
@@ -379,11 +372,11 @@ export class ErrorMonitor extends EventEmitter {
    */
   public getErrorDetails(errorType: ErrorType): {
     count: number;
-    recentErrors: AppError[];
+    recentErrors: ExtendedAppError[];
     averageTimeBetweenErrors: number;
   } {
     const errorsOfType = this.recentErrors.filter(error => error.type === errorType);
-    const timestamps = errorsOfType.map(error => error.timestamp).sort((a, b) => a - b);
+    const timestamps = errorsOfType.map(error => error.timestamp || Date.now()).sort((a, b) => a - b);
     
     let averageTimeBetweenErrors = 0;
     if (timestamps.length > 1) {
@@ -420,7 +413,7 @@ export class ErrorReportGenerator {
   /**
    * 生成错误报告
    */
-  public static generateReport(stats: ErrorStats): string {
+  public static generateReport(stats: ExtendedErrorStats): string {
     const report = [];
     
     report.push('=== 错误监控报告 ===');
@@ -468,7 +461,7 @@ export class ErrorReportGenerator {
     stats.recentErrors.slice(0, 5).forEach((error, index) => {
       report.push(`${index + 1}. [${error.severity}] ${error.type}: ${error.message}`);
       report.push(`   时间: ${new Date(error.timestamp).toLocaleString()}`);
-      report.push(`   ID: ${error.id}`);
+      report.push(`   ID: ${error.errorId}`);
       if (Object.keys(error.context).length > 0) {
         report.push(`   上下文: ${JSON.stringify(error.context)}`);
       }
@@ -481,7 +474,7 @@ export class ErrorReportGenerator {
   /**
    * 生成JSON格式的错误报告
    */
-  public static generateJSONReport(stats: ErrorStats): string {
+  public static generateJSONReport(stats: ExtendedErrorStats): string {
     return JSON.stringify({
       timestamp: Date.now(),
       stats
@@ -497,6 +490,6 @@ export let globalErrorMonitor: ErrorMonitor;
 /**
  * 初始化全局错误监控器
  */
-export function initGlobalErrorMonitor(errorHandler: ErrorHandler, config?: Partial<ErrorMonitorConfig>): void {
+export function initGlobalErrorMonitor(errorHandler: ErrorHandlerWithEvents, config?: Partial<ErrorMonitorConfig>): void {
   globalErrorMonitor = new ErrorMonitor(errorHandler, config);
 }

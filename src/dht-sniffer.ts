@@ -1,12 +1,17 @@
 import { EventEmitter } from 'events';
 import { emitter } from 'last-one-wins';
 import * as utils from './utils';
-import { ErrorHandler } from './utils/error-handler';
-import { ErrorMonitor, ErrorMonitorConfig } from './utils/error-monitor';
+import { ErrorHandler, ErrorHandlerImpl } from './errors/error-handler';
+import { ErrorMonitor, ErrorMonitorConfig } from './errors/error-monitor';
 import { CacheManager, CacheConfig } from './core/cache-manager';
 import { PeerManager } from './core/peer-manager';
 import { MetadataManager, MetadataManagerConfig } from './core/metadata-manager';
 import { DHTManager, DHTManagerConfig } from './core/dht-manager';
+import { createDefaultContainer, DIContainer } from './core/container';
+import { ConfigValidatorManager } from './config/validator';
+import { createDefaultEventBus, EventBus, EventTypes } from './core/event-bus';
+import * as os from 'os';
+import * as process from 'process';
 
 /**
  * DHT嗅探器配置
@@ -23,11 +28,19 @@ export interface DHTSnifferConfig {
   downloadMaxTime?: number;
   ignoreFetched?: boolean;
   aggressiveLevel?: number;
-  errorHandler?: ErrorHandler;
+  errorHandler?: ErrorHandlerImpl;
   errorMonitor?: ErrorMonitor;
   errorMonitorConfig?: ErrorMonitorConfig;
   cacheConfig?: CacheConfig;
   cacheManager?: CacheManager;
+  enablePerformanceMonitoring?: boolean;
+  performanceMonitoringInterval?: number;
+  enableHealthCheck?: boolean;
+  healthCheckInterval?: number;
+  gracefulShutdownTimeout?: number;
+  maxMemoryUsage?: number;
+  enableAutoRestart?: boolean;
+  restartDelay?: number;
 }
 
 /**
@@ -35,13 +48,22 @@ export interface DHTSnifferConfig {
  */
 export class DHTSniffer extends EventEmitter {
   private config: DHTSnifferConfig;
-  private errorHandler: ErrorHandler;
+  private container: DIContainer;
+  private configValidator: ConfigValidatorManager;
+  private eventBus: EventBus;
+  private errorHandler: ErrorHandlerImpl;
   private errorMonitor: ErrorMonitor;
   private cacheManager: CacheManager;
   private peerManager: PeerManager;
   private metadataManager: MetadataManager;
   private dhtManager: DHTManager;
   private isRunning: boolean;
+  private performanceMonitoringInterval?: NodeJS.Timeout;
+  private healthCheckInterval?: NodeJS.Timeout;
+  private startTime: number;
+  private restartCount: number;
+  private lastRestartTime: number;
+  private isShuttingDown: boolean;
 
   constructor(config: DHTSnifferConfig = {}) {
     super();
@@ -56,147 +78,257 @@ export class DHTSniffer extends EventEmitter {
       maximumWaitingQueueSize: -1,
       downloadMaxTime: 20000,
       ignoreFetched: true,
-      aggressiveLevel: 0
+      aggressiveLevel: 0,
+      enablePerformanceMonitoring: true,
+      performanceMonitoringInterval: 30000,
+      enableHealthCheck: true,
+      healthCheckInterval: 60000,
+      gracefulShutdownTimeout: 10000,
+      maxMemoryUsage: 512 * 1024 * 1024, // 512MB
+      enableAutoRestart: false,
+      restartDelay: 5000
     }, config);
     
     this.isRunning = false;
+    this.startTime = Date.now();
+    this.restartCount = 0;
+    this.lastRestartTime = 0;
+    this.isShuttingDown = false;
 
-    // 初始化错误处理器
-    this.errorHandler = config.errorHandler || new ErrorHandler();
+    // 初始化架构组件
+    this.initializeArchitectureComponents();
 
-    // 初始化错误监控器
-    this.errorMonitor = config.errorMonitor || new ErrorMonitor(
-      this.errorHandler,
-      config.errorMonitorConfig || {
-        statsIntervalMs: 60000,
-        maxRecentErrors: 100,
-        errorRateWindowMs: 300000,
-        enableAlerts: true,
-        alertThresholds: {
-          errorRate: 10,
-          criticalErrors: 5,
-          consecutiveErrors: 20
-        }
-      }
-    );
+    // 初始化业务组件
+    this.initializeBusinessComponents();
 
-    // 初始化缓存管理器
-    this.cacheManager = config.cacheManager || new CacheManager(
-      config.cacheConfig || {
-        fetchedTupleSize: 1000,
-        fetchedInfoHashSize: 5000,
-        findNodeCacheSize: 1000,
-        latestCalledPeersSize: 500,
-        usefulPeersSize: 50000,
-        metadataFetchingCacheSize: 1000
-      }
-    );
-
-    // 初始化节点管理器
-    this.peerManager = new PeerManager(
-      {
-        maxNodes: this.config.nodesMaxSize!,
-        nodeRefreshTime: this.config.refreshPeriod!,
-        findNodeProbability: 0.1
-      },
-      null, // DHT实例将在DHTManager启动后设置
-      this.cacheManager
-    );
-
-    // 初始化元数据管理器
-    this.metadataManager = new MetadataManager(
-      {
-        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent!,
-        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize!,
-        downloadMaxTime: this.config.downloadMaxTime!,
-        ignoreFetched: this.config.ignoreFetched!,
-        aggressiveLevel: this.config.aggressiveLevel!
-      },
-      this.errorHandler,
-      this.cacheManager
-    );
-
-    // 初始化DHT管理器
-    const dhtConfig: DHTManagerConfig = {
-      port: this.config.port!,
-      bootstrap: this.config.bootstrap,
-      nodesMaxSize: this.config.nodesMaxSize!,
-      refreshPeriod: this.config.refreshPeriod!,
-      announcePeriod: this.config.announcePeriod!
-    };
-    
-    // 只有在提供了address时才添加
-    if (this.config.address !== undefined) {
-      dhtConfig.address = this.config.address;
-    }
-    
-    this.dhtManager = new DHTManager(
-      dhtConfig,
-      this.errorHandler,
-      this.peerManager
-    );
-
-    // 设置管理器间的事件监听
-    this.setupManagerEventListeners();
+    // 设置事件监听
+    this.setupEventListeners();
   }
 
   /**
-   * 设置管理器间的事件监听
+   * 初始化架构组件
    */
-  private setupManagerEventListeners(): void {
-    // DHT管理器事件
-    this.dhtManager.on('peer', (peerInfo: { peer: any; infoHash: Buffer }) => {
+  private initializeArchitectureComponents(): void {
+    // 初始化配置验证器
+    this.configValidator = new ConfigValidatorManager();
+    
+    // 验证配置 - 将扁平配置转换为验证器期望的结构
+    const structuredConfig = {
+      dht: {
+        port: this.config.port,
+        nodesMaxSize: this.config.nodesMaxSize,
+        refreshPeriod: this.config.refreshPeriod,
+        announcePeriod: this.config.announcePeriod,
+        address: this.config.address,
+        bootstrap: this.config.bootstrap
+      },
+      cache: this.config.cacheConfig || {},
+      metadata: {
+        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent,
+        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize,
+        downloadMaxTime: this.config.downloadMaxTime,
+        ignoreFetched: this.config.ignoreFetched,
+        aggressiveLevel: this.config.aggressiveLevel
+      }
+    };
+    
+    const validationResult = this.configValidator.validateAll(structuredConfig);
+    const hasErrors = Object.values(validationResult).some(result => !result.isValid);
+    if (hasErrors) {
+      const errorMessages = Object.entries(validationResult)
+        .filter(([, result]) => !result.isValid)
+        .map(([type, result]) => `${type}: ${result.errors.join(', ')}`)
+        .join('; ');
+      throw new Error(`Configuration validation failed: ${errorMessages}`);
+    }
+
+    // 初始化事件总线
+    this.eventBus = createDefaultEventBus();
+
+    // 初始化依赖注入容器 - 重新组织配置结构
+    const containerConfig = {
+      dht: {
+        port: this.config.port,
+        nodesMaxSize: this.config.nodesMaxSize,
+        refreshPeriod: this.config.refreshPeriod,
+        announcePeriod: this.config.announcePeriod,
+        address: this.config.address,
+        bootstrap: this.config.bootstrap
+      },
+      cache: this.config.cacheConfig || {
+        fetchedTupleSize: 1000,
+        fetchedInfoHashSize: 5000,
+        findNodeCacheSize: 2000,
+        latestCalledPeersSize: 1000,
+        usefulPeersSize: 5000,
+        metadataFetchingCacheSize: 1000
+      },
+      metadata: {
+        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent,
+        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize,
+        downloadMaxTime: this.config.downloadMaxTime,
+        ignoreFetched: this.config.ignoreFetched,
+        aggressiveLevel: this.config.aggressiveLevel
+      },
+      peer: {},
+      errorMonitorConfig: this.config.errorMonitorConfig || {}
+    };
+    this.container = createDefaultContainer(containerConfig);
+  }
+
+  /**
+   * 初始化业务组件
+   */
+  private initializeBusinessComponents(): void {
+    // 从容器获取组件实例
+    this.errorHandler = this.container.get<ErrorHandlerImpl>('errorHandler');
+    this.errorMonitor = this.container.get<ErrorMonitor>('errorMonitor');
+    this.cacheManager = this.container.get<CacheManager>('cacheManager');
+    this.peerManager = this.container.get<PeerManager>('peerManager');
+    this.metadataManager = this.container.get<MetadataManager>('metadataManager');
+    this.dhtManager = this.container.get<DHTManager>('dhtManager');
+  }
+
+  /**
+   * 设置事件监听
+   */
+  private setupEventListeners(): void {
+    // 设置事件总线监听器
+    this.setupEventBusListeners();
+    
+    // 设置管理器事件转发
+    this.setupManagerEventForwarding();
+  }
+
+  /**
+   * 设置事件总线监听器
+   */
+  private setupEventBusListeners(): void {
+    // 监听DHT管理器事件
+    this.eventBus.subscribe(EventTypes.DHT.peerFound, (peerInfo: { peer: any; infoHash: Buffer }) => {
       const { peer, infoHash } = peerInfo;
-      this.metadataManager.addQueuingMetadata(infoHash, peer);
+      // 通过事件总线通知元数据管理器
+      this.eventBus.publish(EventTypes.METADATA.queueRequest, { infoHash, peer });
+      // 转发到外部事件
       this.emit('peer', peerInfo);
     });
 
-    this.dhtManager.on('node', (node: any) => {
+    this.eventBus.subscribe(EventTypes.DHT.nodeFound, (node: any) => {
       this.emit('node', node);
     });
 
-    this.dhtManager.on('error', (error: Error) => {
+    this.eventBus.subscribe(EventTypes.DHT.error, (error: Error) => {
       this.emit('error', error);
     });
 
-    this.dhtManager.on('warning', (warning: string) => {
+    this.eventBus.subscribe(EventTypes.DHT.warning, (warning: any) => {
       this.emit('warning', warning);
     });
 
-    this.dhtManager.on('infoHash', (peerInfo: { infoHash: Buffer; peer: any }) => {
+    this.eventBus.subscribe(EventTypes.DHT.infoHashFound, (peerInfo: { infoHash: Buffer; peer: any }) => {
       this.emit('infoHash', peerInfo);
     });
 
-    // 元数据管理器事件
-    this.metadataManager.on('metadata', (metadataInfo: { infoHash: Buffer; metadata: any }) => {
+    // 监听元数据管理器事件
+    this.eventBus.subscribe(EventTypes.METADATA.fetched, (metadataInfo: { infoHash: Buffer; metadata: any }) => {
       this.emit('metadata', metadataInfo);
     });
 
-    this.metadataManager.on('metadataError', (errorInfo: any) => {
+    this.eventBus.subscribe(EventTypes.METADATA.error, (errorInfo: any) => {
       this.emit('metadataError', errorInfo);
+    });
+
+    // 监听系统事件
+    this.eventBus.subscribe(EventTypes.SYSTEM.memoryWarning, (warning: any) => {
+      this.emit('memoryWarning', warning);
+    });
+
+    this.eventBus.subscribe(EventTypes.SYSTEM.performanceStats, (stats: any) => {
+      this.emit('performanceStats', stats);
+    });
+
+    this.eventBus.subscribe(EventTypes.SYSTEM.healthCheck, (health: any) => {
+      this.emit('healthCheck', health);
+    });
+  }
+
+  /**
+   * 设置管理器事件转发
+   */
+  private setupManagerEventForwarding(): void {
+    // DHT管理器事件转发到事件总线
+    this.dhtManager.on('peer', (peerInfo: { peer: any; infoHash: Buffer }) => {
+      this.eventBus.publish(EventTypes.DHT.peerFound, peerInfo);
+    });
+
+    this.dhtManager.on('node', (node: any) => {
+      this.eventBus.publish(EventTypes.DHT.nodeFound, node);
+    });
+
+    this.dhtManager.on('error', (error: Error) => {
+      this.eventBus.publish(EventTypes.DHT.error, error);
+    });
+
+    this.dhtManager.on('warning', (warning: string) => {
+      this.eventBus.publish(EventTypes.DHT.warning, { message: warning });
+    });
+
+    this.dhtManager.on('infoHash', (peerInfo: { infoHash: Buffer; peer: any }) => {
+      this.eventBus.publish(EventTypes.DHT.infoHashFound, peerInfo);
+    });
+
+    // 元数据管理器事件转发到事件总线
+    this.metadataManager.on('metadata', (metadataInfo: { infoHash: Buffer; metadata: any }) => {
+      this.eventBus.publish(EventTypes.METADATA.fetched, metadataInfo);
+    });
+
+    this.metadataManager.on('metadataError', (errorInfo: any) => {
+      this.eventBus.publish(EventTypes.METADATA.error, errorInfo);
     });
   }
 
   /**
    * 启动嗅探器
    */
-  start(): void {
+  async start(): Promise<void> {
     if (this.isRunning) {
       return;
     }
 
     try {
       // 启动DHT管理器
-      this.dhtManager.start();
+      await this.dhtManager.start();
 
       // 在DHT管理器启动后，设置PeerManager的DHT实例
       const dhtInstance = this.dhtManager.getDHT();
       this.peerManager.setDHT(dhtInstance);
+      
+      // 更新容器中的DHT实例引用
+      this.container.register('dhtInstance', dhtInstance);
 
       this.isRunning = true;
+      this.startTime = Date.now();
+      
+      // 启动性能监控
+      if (this.config.enablePerformanceMonitoring) {
+        this.startPerformanceMonitoring();
+      }
+      
+      // 启动健康检查
+      if (this.config.enableHealthCheck) {
+        this.startHealthCheck();
+      }
+      
+      // 通过事件总线发布启动完成事件
+      this.eventBus.publish(EventTypes.SYSTEM.started, {
+        startTime: this.startTime,
+        config: this.config
+      });
+      
       this.emit('started');
     } catch (error) {
       this.isRunning = false;
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.start' });
       throw error;
     }
   }
@@ -204,22 +336,58 @@ export class DHTSniffer extends EventEmitter {
   /**
    * 停止嗅探器
    */
-  stop(): void {
-    if (!this.isRunning) {
+  async stop(): Promise<void> {
+    if (!this.isRunning || this.isShuttingDown) {
       return;
     }
 
+    this.isShuttingDown = true;
+
     try {
+      // 停止监控和健康检查
+      this.stopPerformanceMonitoring();
+      this.stopHealthCheck();
+      
       // 停止DHT管理器
-      this.dhtManager.stop();
+      await this.dhtManager.stop();
 
       // 清理元数据管理器
       this.metadataManager.clear();
+      
+      // 清理缓存管理器
+      await this.cacheManager.destroy();
+      
+      // 清理节点管理器
+      this.peerManager.clear();
+
+      // 清理架构组件
+      await this.cleanupArchitectureComponents();
 
       this.isRunning = false;
+      this.isShuttingDown = false;
       this.emit('stopped');
     } catch (error) {
+      this.isShuttingDown = false;
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.stop' });
       throw error;
+    }
+  }
+
+  /**
+   * 清理架构组件
+   */
+  private async cleanupArchitectureComponents(): Promise<void> {
+    try {
+      // 清理事件总线
+      this.eventBus.clearAllSubscriptions();
+      
+      // 清理依赖注入容器
+      this.container.clear();
+      
+      // 清理配置验证器
+      // ConfigValidatorManager没有clear方法，跳过清理
+    } catch (error) {
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.cleanupArchitectureComponents' });
     }
   }
 
@@ -301,11 +469,31 @@ export class DHTSniffer extends EventEmitter {
     const dhtStats = this.dhtManager.getStats();
     const metadataStats = this.metadataManager.getStats();
     const errorStats = this.errorMonitor.getStats();
+    const cacheStats = this.cacheManager.getStats();
+    const peerStats = this.peerManager.getStats();
+    
+    const memoryUsage = process.memoryUsage();
+    const uptime = Date.now() - this.startTime;
 
     return {
       ...dhtStats,
       ...metadataStats,
-      errors: errorStats
+      ...cacheStats,
+      ...peerStats,
+      errors: errorStats,
+      system: {
+        uptime,
+        restartCount: this.restartCount,
+        lastRestartTime: this.lastRestartTime,
+        memory: {
+          rss: memoryUsage.rss,
+          heapTotal: memoryUsage.heapTotal,
+          heapUsed: memoryUsage.heapUsed,
+          external: memoryUsage.external,
+          maxMemoryUsage: this.config.maxMemoryUsage
+        },
+        cpu: process.cpuUsage()
+      }
     };
   }
 
@@ -356,5 +544,284 @@ export class DHTSniffer extends EventEmitter {
    */
   getDHTManager(): DHTManager {
     return this.dhtManager;
+  }
+
+  /**
+   * 获取依赖注入容器
+   */
+  getContainer(): DIContainer {
+    return this.container;
+  }
+
+  /**
+   * 获取配置验证器
+   */
+  getConfigValidator(): ConfigValidatorManager {
+    return this.configValidator;
+  }
+
+  /**
+   * 获取事件总线
+   */
+  getEventBus(): EventBus {
+    return this.eventBus;
+  }
+
+  /**
+   * 启动性能监控
+   */
+  private startPerformanceMonitoring(): void {
+    if (this.performanceMonitoringInterval) {
+      return;
+    }
+    
+    this.performanceMonitoringInterval = setInterval(() => {
+      const stats = this.getStats();
+      const memoryUsage = stats.system.memory;
+      
+      // 检查内存使用
+      if (memoryUsage.heapUsed > this.config.maxMemoryUsage!) {
+        const memoryWarning = {
+          current: memoryUsage.heapUsed,
+          max: this.config.maxMemoryUsage,
+          message: 'Memory usage exceeds threshold'
+        };
+        
+        // 通过事件总线发布内存警告
+        this.eventBus.publish(EventTypes.SYSTEM.memoryWarning, memoryWarning);
+        
+        // 触发内存清理
+        this.performMemoryCleanup();
+      }
+      
+      // 发送性能统计
+      const performanceStats = {
+        memory: memoryUsage,
+        uptime: stats.system.uptime,
+        cpu: stats.system.cpu,
+        cache: {
+          hitRate: stats.cacheHitRate || 0,
+          size: stats.cacheSize || 0
+        }
+      };
+      
+      // 通过事件总线发布性能统计
+      this.eventBus.publish(EventTypes.SYSTEM.performanceStats, performanceStats);
+    }, this.config.performanceMonitoringInterval);
+  }
+
+  /**
+   * 停止性能监控
+   */
+  private stopPerformanceMonitoring(): void {
+    if (this.performanceMonitoringInterval) {
+      clearInterval(this.performanceMonitoringInterval);
+      this.performanceMonitoringInterval = undefined;
+    }
+  }
+
+  /**
+   * 启动健康检查
+   */
+  private startHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      return;
+    }
+    
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        const health = await this.performHealthCheck();
+        
+        // 通过事件总线发布健康检查结果
+        this.eventBus.publish(EventTypes.SYSTEM.healthCheck, health);
+        
+        // 如果健康检查失败且启用了自动重启
+        if (!health.healthy && this.config.enableAutoRestart && !this.isShuttingDown) {
+          await this.performRestart();
+        }
+      } catch (error) {
+        this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.healthCheck' });
+      }
+    }, this.config.healthCheckInterval);
+  }
+
+  /**
+   * 停止健康检查
+   */
+  private stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = undefined;
+    }
+  }
+
+  /**
+   * 执行健康检查
+   */
+  private async performHealthCheck(): Promise<{
+    healthy: boolean;
+    checks: {
+      dhtManager: boolean;
+      peerManager: boolean;
+      metadataManager: boolean;
+      cacheManager: boolean;
+      memory: boolean;
+    };
+    issues: string[];
+  }> {
+    const checks = {
+      dhtManager: this.dhtManager.getIsRunning(),
+      peerManager: this.peerManager.getStats().nodeCount > 0,
+      metadataManager: this.metadataManager.getStats().activeFetchingCount >= 0,
+      cacheManager: this.cacheManager.getStats().totalSize >= 0,
+      memory: process.memoryUsage().heapUsed < this.config.maxMemoryUsage!
+    };
+    
+    const issues: string[] = [];
+    
+    if (!checks.dhtManager) issues.push('DHT Manager is not running');
+    if (!checks.peerManager) issues.push('Peer Manager has no nodes');
+    if (!checks.metadataManager) issues.push('Metadata Manager has issues');
+    if (!checks.cacheManager) issues.push('Cache Manager has issues');
+    if (!checks.memory) issues.push('Memory usage too high');
+    
+    return {
+      healthy: Object.values(checks).every(check => check),
+      checks,
+      issues
+    };
+  }
+
+  /**
+   * 执行内存清理
+   */
+  private async performMemoryCleanup(): Promise<void> {
+    try {
+      // 清理缓存
+      await this.cacheManager.cleanupMemory();
+      
+      // 清理过期节点
+      this.peerManager.cleanup();
+      
+      // 清理DHT管理器内存
+      this.dhtManager.performMemoryCleanup();
+      
+      // 触发垃圾回收（如果可用）
+      if (global.gc) {
+        global.gc();
+      }
+      
+      // 通过事件总线发布内存清理完成事件
+      this.eventBus.publish(EventTypes.SYSTEM.memoryCleanupCompleted, {
+        timestamp: Date.now()
+      });
+      
+      this.emit('memoryCleanupCompleted');
+    } catch (error) {
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.performMemoryCleanup' });
+    }
+  }
+
+  /**
+   * 执行重启
+   */
+  private async performRestart(): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+    
+    const restartInfo = {
+      restartCount: this.restartCount,
+      timestamp: Date.now()
+    };
+    
+    // 通过事件总线发布重启开始事件
+    this.eventBus.publish(EventTypes.SYSTEM.restarting, restartInfo);
+    
+    this.emit('restarting');
+    
+    try {
+      await this.stop();
+      
+      // 等待重启延迟
+      await new Promise(resolve => setTimeout(resolve, this.config.restartDelay));
+      
+      await this.start();
+      
+      this.restartCount++;
+      this.lastRestartTime = Date.now();
+      
+      const completedRestartInfo = {
+        restartCount: this.restartCount,
+        restartTime: this.lastRestartTime
+      };
+      
+      // 通过事件总线发布重启完成事件
+      this.eventBus.publish(EventTypes.SYSTEM.restarted, completedRestartInfo);
+      
+      this.emit('restarted', completedRestartInfo);
+    } catch (error) {
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.performRestart' });
+      
+      // 通过事件总线发布重启失败事件
+      this.eventBus.publish(EventTypes.SYSTEM.restartFailed, {
+        error,
+        timestamp: Date.now()
+      });
+      
+      this.emit('restartFailed', error);
+    }
+  }
+
+  /**
+   * 优雅关闭
+   */
+  async gracefulShutdown(): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+    
+    const shutdownInfo = {
+      timestamp: Date.now(),
+      timeout: this.config.gracefulShutdownTimeout
+    };
+    
+    // 通过事件总线发布关闭开始事件
+    this.eventBus.publish(EventTypes.SYSTEM.shuttingDown, shutdownInfo);
+    
+    this.emit('shuttingDown');
+    
+    try {
+      // 设置超时
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Graceful shutdown timeout')), this.config.gracefulShutdownTimeout);
+      });
+      
+      await Promise.race([
+        this.stop(),
+        timeoutPromise
+      ]);
+      
+      const completedShutdownInfo = {
+        timestamp: Date.now(),
+        duration: Date.now() - shutdownInfo.timestamp
+      };
+      
+      // 通过事件总线发布关闭完成事件
+      this.eventBus.publish(EventTypes.SYSTEM.shutdownCompleted, completedShutdownInfo);
+      
+      this.emit('shutdownCompleted');
+    } catch (error) {
+      this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.gracefulShutdown' });
+      
+      // 通过事件总线发布关闭失败事件
+      this.eventBus.publish(EventTypes.SYSTEM.shutdownFailed, {
+        error,
+        timestamp: Date.now()
+      });
+      
+      this.emit('shutdownFailed', error);
+      throw error;
+    }
   }
 }

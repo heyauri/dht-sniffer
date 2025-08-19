@@ -1,70 +1,65 @@
 import { LRUCache } from 'lru-cache';
+import { ErrorHandlerImpl } from '../errors/error-handler';
+import { CacheError } from '../types/error';
+import { CacheConfig, CacheStats } from '../types/cache';
+import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
 
 /**
- * 缓存配置接口
+ * 扩展的内存使用情况接口，包含缓存内存信息
  */
-export interface CacheConfig {
-  fetchedTupleSize: number;
-  fetchedInfoHashSize: number;
-  findNodeCacheSize: number;
-  latestCalledPeersSize: number;
-  usefulPeersSize: number;
-  metadataFetchingCacheSize: number;
-  // 新增缓存策略配置
-  enableDynamicSizing?: boolean;
-  enablePreheating?: boolean;
-  minCacheSize?: number;
-  maxCacheSize?: number;
-  cacheHitThreshold?: number;
-  cleanupInterval?: number;
+interface ExtendedMemoryUsage extends NodeJS.MemoryUsage {
+  cacheMemory: number;
+  isMemoryWarning: boolean;
 }
 
 /**
- * 缓存统计信息
+ * 缓存管理器配置接口
  */
-export interface CacheStats {
-  fetchedTupleHit: number;
-  fetchedInfoHashHit: number;
-  fetchedTupleSize: number;
-  fetchedInfoHashSize: number;
-  metadataFetchingCacheSize: number;
-  // 新增统计信息
-  fetchedTupleMiss: number;
-  fetchedInfoHashMiss: number;
-  totalRequests: number;
-  hitRate: number;
-  lastCleanupTime: number;
-  dynamicSizingEvents: number;
-  preheatingEvents: number;
-}
+export interface CacheManagerExtendedConfig extends CacheConfig, BaseManagerConfig {}
 
 /**
  * 缓存管理器 - 负责管理所有LRU缓存实例
  */
-export class CacheManager {
+export class CacheManager extends BaseManager {
   private fetchedTuple: LRUCache<string, number>;
   private fetchedInfoHash: LRUCache<string, number>;
   private findNodeCache: LRUCache<string, number>;
   private latestCalledPeers: LRUCache<string, number>;
-  private usefulPeers: LRUCache<string, any>;
+  private usefulPeers: LRUCache<string, { peer: any; infoHash?: Buffer }>;
   private metadataFetchingCache: LRUCache<string, number>;
   
   private counter: CacheStats;
-  private config: CacheConfig;
-  private cleanupInterval: NodeJS.Timeout | null;
+  protected config: CacheManagerExtendedConfig;
   private cacheAccessHistory: Map<string, { count: number; lastAccess: number }>;
+  private circuitBreakerState: Map<string, { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' }>;
+  private retryAttempts: Map<string, number>;
+  private compressedCache: Map<string, Buffer>;
   
-  constructor(config: CacheConfig) {
-    // 设置默认配置
+  constructor(config: CacheManagerExtendedConfig, errorHandler?: ErrorHandlerImpl) {
+    super(config, errorHandler);
+    
+    // 验证配置
+    this.validateConfig(config);
+    
+    // 设置缓存特定默认配置
     this.config = {
       enableDynamicSizing: true,
       enablePreheating: false,
       minCacheSize: 100,
       maxCacheSize: 100000,
       cacheHitThreshold: 0.8,
-      cleanupInterval: 5 * 60 * 1000, // 5分钟
+      enableCompression: false,
+      compressionThreshold: 1024, // 1KB
+      maxRetryAttempts: 3,
+      circuitBreakerThreshold: 5,
+      memoryWarningThreshold: 50 * 1024 * 1024, // 50MB
       ...config
     };
+    
+    // 初始化熔断器状态
+    this.circuitBreakerState = new Map();
+    this.retryAttempts = new Map();
+    this.compressedCache = new Map();
     
     this.fetchedTuple = new LRUCache({ 
       max: this.config.fetchedTupleSize, 
@@ -87,7 +82,7 @@ export class CacheManager {
       ttl: 5 * 60 * 1000 
     });
     
-    this.usefulPeers = new LRUCache({ 
+    this.usefulPeers = new LRUCache<string, { peer: any; infoHash?: Buffer }>({ 
       max: this.config.usefulPeersSize 
     });
     
@@ -108,14 +103,11 @@ export class CacheManager {
       hitRate: 0,
       lastCleanupTime: Date.now(),
       dynamicSizingEvents: 0,
-      preheatingEvents: 0
+      preheatingEvents: 0,
+      totalSize: 0
     };
     
-    this.cleanupInterval = null;
     this.cacheAccessHistory = new Map();
-    
-    // 启动定期清理任务
-    this.startPeriodicCleanup();
   }
   
   /**
@@ -131,9 +123,11 @@ export class CacheManager {
    * @returns 缓存值或undefined
    */
   getFetchedTupleValue(key: string): number | undefined {
-    const value = this.fetchedTuple.get(key);
-    this.recordCacheAccess('fetchedTuple', key, value !== undefined);
-    return value;
+    return this.executeWithCircuitBreaker('fetchedTuple', key, () => {
+      const value = this.fetchedTuple.get(key);
+      this.recordCacheAccess('fetchedTuple', key, value !== undefined);
+      return value;
+    });
   }
   
   /**
@@ -149,9 +143,11 @@ export class CacheManager {
    * @returns 缓存值或undefined
    */
   getFetchedInfoHashValue(key: string): number | undefined {
-    const value = this.fetchedInfoHash.get(key);
-    this.recordCacheAccess('fetchedInfoHash', key, value !== undefined);
-    return value;
+    return this.executeWithCircuitBreaker('fetchedInfoHash', key, () => {
+      const value = this.fetchedInfoHash.get(key);
+      this.recordCacheAccess('fetchedInfoHash', key, value !== undefined);
+      return value;
+    });
   }
   
   /**
@@ -199,12 +195,13 @@ export class CacheManager {
   /**
    * 获取缓存统计信息
    */
-  getStats(): CacheStats {
+  getCacheStats(): CacheStats {
     return {
       ...this.counter,
       fetchedTupleSize: this.fetchedTuple.size,
       fetchedInfoHashSize: this.fetchedInfoHash.size,
-      metadataFetchingCacheSize: this.metadataFetchingCache.size
+      metadataFetchingCacheSize: this.metadataFetchingCache.size,
+      totalSize: this.fetchedTuple.size + this.fetchedInfoHash.size + this.findNodeCache.size + this.latestCalledPeers.size + this.usefulPeers.size + this.metadataFetchingCache.size
     };
   }
   
@@ -244,21 +241,39 @@ export class CacheManager {
   /**
    * 清理所有缓存
    */
-  clearAll(): void {
-    this.fetchedTuple.clear();
-    this.fetchedInfoHash.clear();
-    this.findNodeCache.clear();
-    this.latestCalledPeers.clear();
-    this.usefulPeers.clear();
-    this.metadataFetchingCache.clear();
+  clearAllCaches(): void {
+    try {
+      this.fetchedTuple.clear();
+      this.fetchedInfoHash.clear();
+      this.findNodeCache.clear();
+      this.latestCalledPeers.clear();
+      this.usefulPeers.clear();
+      this.metadataFetchingCache.clear();
+      this.compressedCache.clear();
+      this.emit('cachesCleared');
+    } catch (error) {
+      this.handleError('clearAllCaches', error);
+    }
   }
   
   /**
    * 添加peer到缓存
    */
   addPeerToCache(peerKey: string, peerInfo: { peer: any; infoHash?: Buffer }): void {
-    const { peer, infoHash } = peerInfo;
-    this.usefulPeers.set(peerKey, { peer, infoHash });
+    try {
+      const { peer, infoHash } = peerInfo;
+      
+      // 检查是否需要压缩
+      if (this.config.enableCompression && this.shouldCompress(peer)) {
+        const compressed = this.compressData(peer);
+        this.compressedCache.set(peerKey, compressed);
+      }
+      
+      this.usefulPeers.set(peerKey, { peer, infoHash });
+      this.emit('peerAdded', { peerKey, peerInfo });
+    } catch (error) {
+      this.handleError('addPeerToCache', error, { peerKey });
+    }
   }
   
   /**
@@ -434,39 +449,8 @@ export class CacheManager {
     }
   }
   
-  /**
-   * 启动定期清理任务
-   */
-  private startPeriodicCleanup(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-    }
-    
-    this.cleanupInterval = setInterval(() => {
-      this.performCleanup();
-    }, this.config.cleanupInterval);
-  }
-  
-  /**
-   * 执行缓存清理
-   */
-  private performCleanup(): void {
-    const now = Date.now();
-    this.counter.lastCleanupTime = now;
-    
-    // 清理过期的访问历史记录
-    const expiredKeys: string[] = [];
-    for (const [key, data] of this.cacheAccessHistory) {
-      if (now - data.lastAccess > 24 * 60 * 60 * 1000) { // 24小时
-        expiredKeys.push(key);
-      }
-    }
-    
-    expiredKeys.forEach(key => this.cacheAccessHistory.delete(key));
-    
-    // 动态调整缓存大小
-    this.adjustCacheSizes();
-  }
+
+
   
   /**
    * 缓存预热
@@ -501,21 +485,415 @@ export class CacheManager {
   }
   
   /**
-   * 停止定期清理任务
+   * 执行深度清理
    */
-  stopPeriodicCleanup(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
+  protected performDeepCleanup(): void {
+    try {
+      // 清理所有缓存
+      this.clearAllCaches();
+      
+      // 清理访问历史记录
+      this.clearExpiredAccessHistory();
+      
+      // 清理熔断器状态
+      this.resetAllCircuitBreakers();
+      
+      // 调用父类的深度清理
+      super.performDeepCleanup();
+    } catch (error) {
+      this.handleCacheError('performDeepCleanup', error);
     }
   }
   
   /**
-   * 销毁缓存管理器
+   * 带熔断器的缓存操作执行器
    */
-  destroy(): void {
-    this.stopPeriodicCleanup();
-    this.clearAll();
+  private executeWithCircuitBreaker<T>(cacheName: string, key: string, operation: () => T): T | undefined {
+    if (!this.config.enableErrorHandling) {
+      return operation();
+    }
+    
+    const circuitKey = `${cacheName}:${key}`;
+    const state = this.getCircuitBreakerState(circuitKey);
+    
+    if (state.state === 'OPEN') {
+      // 熔断器开启，快速失败
+      this.emit('circuitBreakerOpen', { cacheName, key });
+      return undefined;
+    }
+    
+    try {
+      const result = operation();
+      
+      // 成功执行，重置熔断器状态
+      if (state.state === 'HALF_OPEN') {
+        this.resetCircuitBreaker(circuitKey);
+        this.emit('circuitBreakerReset', { cacheName, key });
+      }
+      
+      return result;
+    } catch (error) {
+      this.handleCircuitBreakerFailure(circuitKey, state);
+      this.handleError('executeWithCircuitBreaker', error, { cacheName, key });
+      return undefined;
+    }
+  }
+  
+  /**
+   * 获取熔断器状态
+   */
+  private getCircuitBreakerState(key: string): { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' } {
+    const threshold = this.config.circuitBreakerThreshold || 5;
+    const state = this.circuitBreakerState.get(key) || { failures: 0, lastFailure: 0, state: 'CLOSED' as const };
+    
+    // 检查是否需要从OPEN状态转换为HALF_OPEN
+    if (state.state === 'OPEN' && Date.now() - state.lastFailure > 60000) { // 1分钟后尝试恢复
+      state.state = 'HALF_OPEN';
+      this.circuitBreakerState.set(key, state);
+    }
+    
+    return state;
+  }
+  
+  /**
+   * 处理熔断器失败
+   */
+  private handleCircuitBreakerFailure(key: string, state: { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' }): void {
+    state.failures++;
+    state.lastFailure = Date.now();
+    
+    const threshold = this.config.circuitBreakerThreshold || 5;
+    
+    if (state.failures >= threshold) {
+      state.state = 'OPEN';
+      this.emit('circuitBreakerTripped', { key, failures: state.failures });
+    }
+    
+    this.circuitBreakerState.set(key, state);
+  }
+  
+  /**
+   * 重置熔断器
+   */
+  private resetCircuitBreaker(key: string): void {
+    this.circuitBreakerState.set(key, { failures: 0, lastFailure: 0, state: 'CLOSED' });
+  }
+  
+  /**
+   * 获取管理器名称
+   */
+  protected getManagerName(): string {
+    return 'CacheManager';
+  }
+
+  /**
+   * 执行清理操作
+   */
+  protected performCleanup(): void {
+    this.clearExpiredAccessHistory();
+    this.adjustCacheSizes();
+  }
+
+  /**
+   * 清理数据
+   */
+  protected clearData(): void {
+    this.clearAllCaches();
     this.cacheAccessHistory.clear();
+    this.circuitBreakerState.clear();
+    this.retryAttempts.clear();
+    this.compressedCache.clear();
+  }
+
+  /**
+   * 获取统计信息
+   */
+  getStats(): ManagerStats & CacheStats {
+    return {
+      ...super.getStats(),
+      ...this.getCacheStats()
+    };
+  }
+
+  /**
+   * 缓存特定的错误处理
+   */
+  protected handleCacheError(operation: string, error: any, context?: any): void {
+    const cacheError = new CacheError(
+      `Cache operation failed: ${operation}`,
+      { operation, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
+    );
+    
+    super.handleError(operation, cacheError, context);
+  }
+  
+  /**
+   * 验证配置
+   */
+  protected validateConfig(config: BaseManagerConfig): void {
+    const cacheConfig = config as CacheManagerExtendedConfig;
+    
+    if (cacheConfig.fetchedTupleSize !== undefined && (typeof cacheConfig.fetchedTupleSize !== 'number' || cacheConfig.fetchedTupleSize <= 0)) {
+      throw new Error('fetchedTupleSize must be a positive number');
+    }
+    
+    if (cacheConfig.fetchedInfoHashSize !== undefined && (typeof cacheConfig.fetchedInfoHashSize !== 'number' || cacheConfig.fetchedInfoHashSize <= 0)) {
+      throw new Error('fetchedInfoHashSize must be a positive number');
+    }
+    
+    if (cacheConfig.findNodeCacheSize !== undefined && (typeof cacheConfig.findNodeCacheSize !== 'number' || cacheConfig.findNodeCacheSize <= 0)) {
+      throw new Error('findNodeCacheSize must be a positive number');
+    }
+    
+    if (cacheConfig.latestCalledPeersSize !== undefined && (typeof cacheConfig.latestCalledPeersSize !== 'number' || cacheConfig.latestCalledPeersSize <= 0)) {
+      throw new Error('latestCalledPeersSize must be a positive number');
+    }
+    
+    if (cacheConfig.usefulPeersSize !== undefined && (typeof cacheConfig.usefulPeersSize !== 'number' || cacheConfig.usefulPeersSize <= 0)) {
+      throw new Error('usefulPeersSize must be a positive number');
+    }
+    
+    if (cacheConfig.metadataFetchingCacheSize !== undefined && (typeof cacheConfig.metadataFetchingCacheSize !== 'number' || cacheConfig.metadataFetchingCacheSize <= 0)) {
+      throw new Error('metadataFetchingCacheSize must be a positive number');
+    }
+    
+    if (cacheConfig.maxCacheSize !== undefined && (typeof cacheConfig.maxCacheSize !== 'number' || cacheConfig.maxCacheSize <= 0)) {
+      throw new Error('maxCacheSize must be a positive number');
+    }
+    
+    if (cacheConfig.minCacheSize !== undefined && (typeof cacheConfig.minCacheSize !== 'number' || cacheConfig.minCacheSize <= 0)) {
+      throw new Error('minCacheSize must be a positive number');
+    }
+    
+    if (cacheConfig.cacheHitThreshold !== undefined && (typeof cacheConfig.cacheHitThreshold !== 'number' || cacheConfig.cacheHitThreshold < 0 || cacheConfig.cacheHitThreshold > 1)) {
+      throw new Error('cacheHitThreshold must be a number between 0 and 1');
+    }
+  }
+  
+  /**
+   * 检查是否需要压缩数据
+   */
+  private shouldCompress(data: any): boolean {
+    if (!this.config.enableCompression) {
+      return false;
+    }
+    
+    try {
+      const dataSize = JSON.stringify(data).length;
+      return dataSize > (this.config.compressionThreshold || 1024);
+    } catch {
+      return false;
+    }
+  }
+  
+  /**
+   * 压缩数据
+   */
+  private compressData(data: any): Buffer {
+    try {
+      const jsonString = JSON.stringify(data);
+      return Buffer.from(jsonString, 'utf8');
+    } catch (error) {
+      this.handleError('compressData', error);
+      return Buffer.from(JSON.stringify({}));
+    }
+  }
+  
+  /**
+   * 解压数据
+   */
+  private decompressData(compressed: Buffer): any {
+    try {
+      const jsonString = compressed.toString('utf8');
+      return JSON.parse(jsonString);
+    } catch (error) {
+      this.handleError('decompressData', error);
+      return null;
+    }
+  }
+  
+  /**
+   * 获取压缩的peer数据
+   */
+  getCompressedPeer(peerKey: string): any | null {
+    const compressed = this.compressedCache.get(peerKey);
+    if (!compressed) {
+      return null;
+    }
+    
+    return this.decompressData(compressed);
+  }
+  
+  /**
+   * 计算缓存内存使用量
+   */
+  private calculateCacheMemory(): number {
+    return (
+      this.fetchedTuple.size * 50 + // 估算每个条目50字节
+      this.fetchedInfoHash.size * 50 +
+      this.findNodeCache.size * 50 +
+      this.latestCalledPeers.size * 50 +
+      this.usefulPeers.size * 200 + // peer数据较大
+      this.metadataFetchingCache.size * 50 +
+      this.compressedCache.size * 100 // 压缩数据
+    );
+  }
+  
+  /**
+   * 获取内存使用情况
+   */
+  getMemoryUsage(): ExtendedMemoryUsage {
+    const memoryUsage = process.memoryUsage();
+    const threshold = this.config.memoryWarningThreshold || 50 * 1024 * 1024;
+    const cacheMemory = this.calculateCacheMemory();
+    const isMemoryWarning = memoryUsage.heapUsed > threshold;
+    
+    if (isMemoryWarning) {
+      this.emit('memoryWarning', {
+        heapUsed: memoryUsage.heapUsed,
+        threshold,
+        cacheMemory
+      });
+    }
+    
+    return {
+      ...memoryUsage,
+      cacheMemory,
+      isMemoryWarning
+    };
+  }
+  
+  /**
+   * 获取熔断器状态统计
+   */
+  getCircuitBreakerStats(): Array<{
+    key: string;
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    failures: number;
+    lastFailure: number;
+  }> {
+    return Array.from(this.circuitBreakerState.entries()).map(([key, state]) => ({
+      key,
+      state: state.state,
+      failures: state.failures,
+      lastFailure: state.lastFailure
+    }));
+  }
+
+  /**
+   * 清理过期访问历史记录
+   */
+  private clearExpiredAccessHistory(): void {
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24小时
+    
+    for (const [key, value] of this.cacheAccessHistory.entries()) {
+      if (now - value.lastAccess > maxAge) {
+        this.cacheAccessHistory.delete(key);
+      }
+    }
+  }
+
+  /**
+   * 清理内存
+   */
+  async cleanupMemory(): Promise<void> {
+    try {
+      // 清理过期缓存
+      this.fetchedTuple.purgeStale();
+      this.fetchedInfoHash.purgeStale();
+      this.findNodeCache.purgeStale();
+      this.latestCalledPeers.purgeStale();
+      this.metadataFetchingCache.purgeStale();
+      
+      // 清理压缩缓存
+      this.compressedCache.clear();
+      
+      // 清理访问历史记录
+      this.clearExpiredAccessHistory();
+      
+      // 清理熔断器状态
+      this.cleanupCircuitBreakerStates();
+      
+      // 清理重试计数
+      this.cleanupRetryAttempts();
+      
+      this.emit('memoryCleaned');
+    } catch (error) {
+      this.handleCacheError('cleanupMemory', error);
+    }
+  }
+
+  /**
+   * 清理熔断器状态
+   */
+  private cleanupCircuitBreakerStates(): void {
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24小时
+    
+    for (const [key, state] of this.circuitBreakerState.entries()) {
+      if (now - state.lastFailure > maxAge) {
+        this.circuitBreakerState.delete(key);
+      }
+    }
+  }
+
+  /**
+   * 清理重试计数
+   */
+  private cleanupRetryAttempts(): void {
+    for (const [key, attempts] of this.retryAttempts.entries()) {
+      if (attempts <= 0) {
+        this.retryAttempts.delete(key);
+      }
+    }
+  }
+  
+  /**
+   * 重置所有熔断器
+   */
+  resetAllCircuitBreakers(): void {
+    this.circuitBreakerState.clear();
+    this.emit('allCircuitBreakersReset');
+  }
+  
+  /**
+   * 获取压缩缓存统计
+   */
+  getCompressionStats(): {
+    compressedItems: number;
+    estimatedOriginalSize: number;
+    compressedSize: number;
+    compressionRatio: number;
+  } {
+    const compressedItems = this.compressedCache.size;
+    let estimatedOriginalSize = 0;
+    let compressedSize = 0;
+    
+    for (const [key, compressed] of this.compressedCache) {
+      try {
+        const decompressed = this.decompressData(compressed);
+        if (decompressed) {
+          estimatedOriginalSize += JSON.stringify(decompressed).length;
+        }
+        compressedSize += compressed.length;
+      } catch {
+        // 忽略解压错误
+      }
+    }
+    
+    const compressionRatio = estimatedOriginalSize > 0 
+      ? (estimatedOriginalSize - compressedSize) / estimatedOriginalSize 
+      : 0;
+    
+    return {
+      compressedItems,
+      estimatedOriginalSize,
+      compressedSize,
+      compressionRatio
+    };
   }
 }
+
+// 导出CacheConfig类型
+export type { CacheConfig } from '../types/cache';

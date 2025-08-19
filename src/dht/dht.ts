@@ -5,7 +5,7 @@
 
 //@ts-nocheck
 import { EventEmitter } from 'events'
-import bencode from '../bencode'
+import * as bencode from '../bencode'
 import Debug from 'debug'
 import * as KBucket from 'k-bucket'
 import * as krpc from 'k-rpc'

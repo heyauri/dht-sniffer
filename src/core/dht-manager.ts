@@ -1,21 +1,14 @@
 import { EventEmitter } from 'events';
+import * as crypto from 'crypto';
 import * as DHT from '../dht/dht';
 import * as utils from '../utils';
-import { NetworkError, ErrorHandler, ValidationError } from '../utils/error-handler';
+import { NetworkError, ValidationError } from '../types/error';
+import { ErrorHandlerImpl } from '../errors/error-handler';
 import { PeerManager } from './peer-manager';
-import { DHTOptions, Node } from '../types';
+import { DHTOptions, Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
+import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
 
-/**
- * DHT管理器配置
- */
-export interface DHTManagerConfig {
-  address?: string;
-  port?: number;
-  bootstrap?: boolean | string[];
-  nodesMaxSize: number;
-  refreshPeriod: number;
-  announcePeriod: number;
-}
+
 
 /**
  * 验证DHT管理器配置
@@ -67,9 +60,6 @@ function validateConfig(config: DHTManagerConfig): void {
   }
 }
 
-// DHTManagerConfig扩展了DHTOptions以包含所有DHT相关配置
-export interface DHTManagerExtendedConfig extends DHTManagerConfig, Omit<DHTOptions, 'bootstrap'> {}
-
 // 引导节点
 const bootstrapNodes: Node[] = [
   // BitTorrent官方节点
@@ -93,20 +83,18 @@ const bootstrapNodes: Node[] = [
 /**
  * DHT管理器 - 负责管理DHT网络逻辑
  */
-export class DHTManager extends EventEmitter {
-  private config: DHTManagerExtendedConfig;
-  private errorHandler: ErrorHandler;
+export class DHTManager extends BaseManager {
+  protected config: DHTManagerExtendedConfig;
   private peerManager: PeerManager;
   private dht: any;
   private refreshInterval: NodeJS.Timeout | null;
   private announceInterval: NodeJS.Timeout | null;
-  private isRunning: boolean;
+  private memoryCleanupInterval: NodeJS.Timeout | null;
+  private retryCount: Map<string, number>;
 
-  constructor(config: DHTManagerConfig, errorHandler: ErrorHandler, peerManager: PeerManager) {
-    super();
+  constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager) {
+    super(config, errorHandler);
     
-    // 首先初始化errorHandler
-    this.errorHandler = errorHandler;
     this.peerManager = peerManager;
     
     // 验证配置
@@ -114,29 +102,37 @@ export class DHTManager extends EventEmitter {
       validateConfig(config);
     } catch (error) {
       if (error instanceof ValidationError) {
-        this.errorHandler.handleError(error);
+        this.handleError('validateConfig', error);
         throw error;
       }
+      this.handleError('validateConfig', error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
     
+    // 设置默认配置
     this.config = Object.assign({
       address: '0.0.0.0',
       port: 6881,
-      bootstrapNodes: bootstrapNodes
+      bootstrapNodes: bootstrapNodes,
+      enableMemoryMonitoring: true,
+      memoryThreshold: 100 * 1024 * 1024, // 100MB
+      cleanupInterval: 5 * 60 * 1000, // 5分钟
+      maxRetries: 3,
+      retryDelay: 1000
     }, config);
 
     this.dht = null;
     this.refreshInterval = null;
     this.announceInterval = null;
-    this.isRunning = false;
+    this.memoryCleanupInterval = null;
+    this.retryCount = new Map();
   }
 
   /**
    * 启动DHT网络
    */
   start(): void {
-    if (this.isRunning) {
+    if (this.isDHTRunning()) {
       return;
     }
 
@@ -150,15 +146,14 @@ export class DHTManager extends EventEmitter {
       // 启动定时任务
       this.startPeriodicTasks();
 
-      this.isRunning = true;
+
       this.emit('started');
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to start DHT: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_start', config: this.config },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_start', config: this.config, cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('start', networkError);
       throw networkError;
     }
   }
@@ -167,7 +162,7 @@ export class DHTManager extends EventEmitter {
    * 停止DHT网络
    */
   stop(): void {
-    if (!this.isRunning) {
+    if (!this.isDHTRunning()) {
       return;
     }
 
@@ -180,16 +175,18 @@ export class DHTManager extends EventEmitter {
         this.dht.destroy();
         this.dht = null;
       }
+      
+      // 清理重试计数
+      this.retryCount.clear();
 
-      this.isRunning = false;
+
       this.emit('stopped');
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to stop DHT: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_stop' },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_stop', cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('stop', networkError);
     }
   }
 
@@ -221,10 +218,9 @@ export class DHTManager extends EventEmitter {
     this.dht.on('error', (error: Error) => {
       const networkError = new NetworkError(
         `DHT error: ${error.message}`,
-        { operation: 'dht_event' },
-        error
+        { operation: 'dht_event', cause: error }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('setupEventListeners', networkError);
       this.emit('error', networkError);
     });
 
@@ -247,6 +243,13 @@ export class DHTManager extends EventEmitter {
     this.announceInterval = setInterval(() => {
       this.announce();
     }, this.config.announcePeriod);
+    
+    // 定期内存清理
+    if (this.config.enableMemoryMonitoring) {
+      this.memoryCleanupInterval = setInterval(() => {
+        this.performMemoryCleanup();
+      }, this.config.cleanupInterval);
+    }
   }
 
   /**
@@ -262,68 +265,74 @@ export class DHTManager extends EventEmitter {
       clearInterval(this.announceInterval);
       this.announceInterval = null;
     }
+    
+    if (this.memoryCleanupInterval) {
+      clearInterval(this.memoryCleanupInterval);
+      this.memoryCleanupInterval = null;
+    }
   }
 
   /**
    * 刷新节点
    */
   private refreshNodes(): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
-    try {
-      this.dht.refresh();
+    const operationKey = 'refreshNodes';
+    this.executeWithRetry(operationKey, () => {
+      // dht类没有refresh方法，使用bootstrap来刷新网络连接
+      this.dht._bootstrap(true);
       this.emit('refresh');
-    } catch (error) {
-      const networkError = new NetworkError(
-        `Failed to refresh nodes: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_refresh' },
-        error instanceof Error ? error : new Error(String(error))
-      );
-      this.errorHandler.handleError(networkError);
-    }
+    }, 'dht_refresh');
   }
 
   /**
    * Announce
    */
   private announce(): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
-    try {
+    const operationKey = 'announce';
+    this.executeWithRetry(operationKey, () => {
       this.dht.announce();
       this.emit('announce');
-    } catch (error) {
-      const networkError = new NetworkError(
-        `Failed to announce: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_announce' },
-        error instanceof Error ? error : new Error(String(error))
-      );
-      this.errorHandler.handleError(networkError);
-    }
+    }, 'dht_announce');
   }
 
   /**
    * 查找节点 - 参考原始dht-sniffer实现
    */
-  findNode(peer: any, nodeId?: Buffer): void {
-    if (!this.dht || !this.isRunning) return;
+  findNode(peerOrTarget: any, nodeId?: Buffer): void {
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
-      const nodeKey = utils.getPeerKey(peer);
-
-      // 获取或生成目标ID
-      const target = nodeId !== undefined
-        ? utils.getNeighborId(nodeId, this.dht.nodeId)
-        : this.dht.nodeId;
+      // 检查第一个参数是peer对象还是target Buffer
+      let peer: any;
+      let target: Buffer;
+      
+      if (Buffer.isBuffer(peerOrTarget)) {
+        // 如果是Buffer，作为target使用，需要从bootstrapNodes中选择一个peer
+        target = peerOrTarget;
+        peer = this.config.bootstrapNodes && this.config.bootstrapNodes.length > 0 
+          ? this.config.bootstrapNodes[0] 
+          : { host: 'router.bittorrent.com', port: 6881 };
+      } else {
+        // 如果是peer对象，按原逻辑处理
+        peer = peerOrTarget;
+        const nodeKey = utils.getPeerKey(peer);
+        target = nodeId !== undefined
+          ? utils.getNeighborId(nodeId, this.dht.nodeId)
+          : this.dht.nodeId;
+      }
 
       // 创建find_node消息
       const message = {
-        t: require('crypto').randomBytes(4),
+        t: crypto.randomBytes(4),
         y: 'q',
         q: 'find_node',
         a: {
           id: this.dht.nodeId,
-          target: require('crypto').randomBytes(20)
+          target: target
         }
       };
 
@@ -353,10 +362,10 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to find node: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_find_node', peer },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_find_node', peer: peerOrTarget, cause: error instanceof Error ? error : new Error(String(error)) },
+        true
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('findNode', networkError);
     }
   }
 
@@ -364,17 +373,16 @@ export class DHTManager extends EventEmitter {
    * 查找peers - 对应原始dht的lookup方法
    */
   lookup(infoHash: Buffer, callback?: (err: Error | null, totalNodes?: number) => void): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
       this.dht.lookup(infoHash, (err: Error | null, totalNodes?: number) => {
         if (err) {
           const networkError = new NetworkError(
             `DHT lookup failed for ${infoHash.toString('hex')}: ${err.message}`,
-            { operation: 'dht_lookup', infoHash: infoHash.toString('hex') },
-            err
+            { operation: 'dht_lookup', infoHash: infoHash.toString('hex'), cause: err }
           );
-          this.errorHandler.handleError(networkError);
+          this.handleError('lookup', networkError);
           this.emit('error', networkError);
         }
 
@@ -387,10 +395,9 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to lookup: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_lookup', infoHash: infoHash.toString('hex') },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_lookup', infoHash: infoHash.toString('hex'), cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('lookup', networkError);
     }
   }
 
@@ -398,7 +405,7 @@ export class DHTManager extends EventEmitter {
    * 获取peer
    */
   getPeers(infoHash: Buffer): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
       this.dht.getPeers(infoHash);
@@ -406,10 +413,9 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to get peers: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_get_peers', infoHash: infoHash.toString('hex') },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_get_peers', infoHash: infoHash.toString('hex'), cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('getPeers', networkError);
     }
   }
 
@@ -445,7 +451,7 @@ export class DHTManager extends EventEmitter {
    * Bootstrap DHT网络
    */
   bootstrap(populate: boolean = true): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
       this.dht._bootstrap(populate);
@@ -459,10 +465,9 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to bootstrap: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_bootstrap', populate },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_bootstrap', populate, cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('bootstrap', networkError);
     }
   }
 
@@ -470,18 +475,18 @@ export class DHTManager extends EventEmitter {
    * 刷新DHT网络
    */
   refresh(): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
-      this.dht.refresh();
+      // DHT类没有refresh方法，使用bootstrap来刷新网络连接
+      this.dht._bootstrap(true);
       this.emit('refresh');
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to refresh: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_refresh' },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_refresh', cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('refresh', networkError);
     }
   }
 
@@ -489,7 +494,7 @@ export class DHTManager extends EventEmitter {
    * 添加节点
    */
   addNode(node: any): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
       this.dht.addNode(node);
@@ -497,10 +502,9 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to add node: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_add_node', peer: node },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_add_node', peer: node, cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('addNode', networkError);
     }
   }
 
@@ -508,7 +512,7 @@ export class DHTManager extends EventEmitter {
    * 移除节点
    */
   removeNode(nodeId: Buffer): void {
-    if (!this.dht || !this.isRunning) return;
+    if (!this.dht || !this.isDHTRunning()) return;
 
     try {
       this.dht.removeNode(nodeId);
@@ -516,21 +520,20 @@ export class DHTManager extends EventEmitter {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to remove node: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_remove_node', nodeId: nodeId.toString('hex') },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_remove_node', nodeId: nodeId.toString('hex'), cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('removeNode', networkError);
     }
   }
 
   /**
-   * 获取统计信息
+   * 获取DHT统计信息
    */
-  getStats() {
+  getDHTStats() {
     const peerStats = this.peerManager.getStats();
 
     return {
-      isRunning: this.isRunning,
+      isRunning: this.isDHTRunning(),
       dht: this.dht ? {
         nodes: this.dht.nodes ? this.dht.nodes.length : 0,
         pendingCalls: this.dht._rpc ? this.dht._rpc.pending.length : 0,
@@ -552,24 +555,30 @@ export class DHTManager extends EventEmitter {
    * 检查是否正在运行
    */
   isDHTRunning(): boolean {
-    return this.isRunning;
+    return this.dht !== null;
+  }
+
+  /**
+   * 公共方法：检查是否正在运行
+   */
+  getIsRunning(): boolean {
+    return this.isDHTRunning();
   }
 
   /**
    * 获取DHT地址信息
    */
   address(): any {
-    if (!this.dht || !this.isRunning) return null;
+    if (!this.dht || !this.isDHTRunning()) return null;
 
     try {
       return this.dht.address();
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to get address: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_address' },
-        error instanceof Error ? error : new Error(String(error))
+        { operation: 'dht_address', cause: error instanceof Error ? error : new Error(String(error)) }
       );
-      this.errorHandler.handleError(networkError);
+      this.handleError('address', networkError);
       return null;
     }
   }
@@ -587,7 +596,8 @@ export class DHTManager extends EventEmitter {
   listen(port?: number, address?: string, callback?: () => void): void {
     if (!this.dht) return;
 
-    try {
+    const operationKey = 'listen';
+    this.executeWithRetry(operationKey, () => {
       if (port && address && callback) {
         this.dht.listen(port, address, callback);
       } else if (port && callback) {
@@ -598,13 +608,208 @@ export class DHTManager extends EventEmitter {
         this.dht.listen();
       }
       this.emit('listening');
-    } catch (error) {
-      const networkError = new NetworkError(
-        `Failed to listen: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_listen', port, address },
-        error instanceof Error ? error : new Error(String(error))
-      );
-      this.errorHandler.handleError(networkError);
+    }, 'dht_listen', { port, address });
+  }
+  
+  /**
+   * 带重试机制的执行器
+   */
+  private executeWithRetry(operationKey: string, operation: () => void, operationName: string, context?: any): void {
+    const maxRetries = this.config.maxRetries || 3;
+    const retryDelay = this.config.retryDelay || 1000;
+    
+    const attempt = (attemptNumber: number) => {
+      try {
+        operation();
+        // 成功则清除重试计数
+        this.retryCount.delete(operationKey);
+      } catch (error) {
+        const currentRetries = this.retryCount.get(operationKey) || 0;
+        
+        if (currentRetries < maxRetries) {
+          this.retryCount.set(operationKey, currentRetries + 1);
+          
+          // 延迟重试
+          setTimeout(() => {
+            attempt(currentRetries + 1);
+          }, retryDelay * Math.pow(2, currentRetries)); // 指数退避
+          
+          this.emit('retry', {
+            operation: operationName,
+            attempt: currentRetries + 1,
+            maxRetries,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        } else {
+          // 重试次数用完，报错
+          const networkError = new NetworkError(
+            `Failed after ${maxRetries} retries: ${error instanceof Error ? error.message : String(error)}`,
+            { operation: operationName, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
+          );
+          this.handleError('executeWithRetry', networkError);
+          this.emit('error', networkError);
+          
+          // 清除重试计数
+          this.retryCount.delete(operationKey);
+        }
+      }
+    };
+    
+    attempt(0);
+  }
+  
+  /**
+   * 执行内存清理
+   */
+  public performMemoryCleanup(): void {
+    if (!this.config.enableMemoryMonitoring) return;
+    
+    const memoryUsage = process.memoryUsage();
+    const threshold = this.config.memoryThreshold || 100 * 1024 * 1024;
+    
+    // 检查内存使用情况
+    if (memoryUsage.heapUsed > threshold) {
+      this.emit('memoryWarning', {
+        heapUsed: memoryUsage.heapUsed,
+        heapTotal: memoryUsage.heapTotal,
+        external: memoryUsage.external,
+        rss: memoryUsage.rss,
+        threshold
+      });
+      
+      // 执行清理操作
+      this.cleanupMemory();
     }
   }
+  
+  /**
+   * 清理内存
+   */
+  private cleanupMemory(): void {
+    // 清理PeerManager中的过期节点
+    if (this.peerManager && typeof this.peerManager.cleanupOldNodes === 'function') {
+      this.peerManager.cleanupOldNodes();
+    }
+    
+    // 清理DHT中的过期节点
+    if (this.dht && this.dht._rpc && this.dht._rpc.nodes) {
+      const nodes = this.dht._rpc.nodes;
+      const now = Date.now();
+      const maxAge = 30 * 60 * 1000; // 30分钟
+      
+      // 清理长时间未响应的节点
+      for (const [nodeId, node] of nodes.entries()) {
+        if (node.lastSeen && (now - node.lastSeen) > maxAge) {
+          this.dht._rpc.remove(nodeId);
+        }
+      }
+    }
+    
+    // 清理pending calls
+    if (this.dht && this.dht._rpc && this.dht._rpc.pending) {
+      const pending = this.dht._rpc.pending;
+      const now = Date.now();
+      const maxPendingTime = 60 * 1000; // 1分钟
+      
+      for (let i = pending.length - 1; i >= 0; i--) {
+        const call = pending[i];
+        if (call.timestamp && (now - call.timestamp) > maxPendingTime) {
+          pending.splice(i, 1);
+        }
+      }
+    }
+    
+    // 强制垃圾回收（如果可用）
+    if (global.gc) {
+      global.gc();
+    }
+    
+    this.emit('memoryCleaned');
+  }
+  
+  /**
+   * 获取内存使用统计
+   */
+  getMemoryStats(): any {
+    const memoryUsage = process.memoryUsage();
+    const threshold = this.config.memoryThreshold || 100 * 1024 * 1024;
+    
+    return {
+      heapUsed: memoryUsage.heapUsed,
+      heapTotal: memoryUsage.heapTotal,
+      external: memoryUsage.external,
+      rss: memoryUsage.rss,
+      threshold,
+      usagePercentage: Math.round((memoryUsage.heapUsed / threshold) * 100),
+      retryCounts: Object.fromEntries(this.retryCount),
+      isMemoryWarning: memoryUsage.heapUsed > threshold
+    };
+  }
+  
+  /**
+   * 获取管理器名称
+   */
+  protected getManagerName(): string {
+    return 'DHTManager';
+  }
+
+  /**
+   * 执行清理操作
+   */
+  protected performCleanup(): void {
+    // DHT特定的清理逻辑（如果需要）
+  }
+
+  /**
+   * 清理数据
+   */
+  protected clearData(): void {
+    // DHT特定的数据清理（如果需要）
+  }
+
+  /**
+   * 获取统计信息
+   */
+  getStats(): ManagerStats & any {
+    return {
+      ...super.getStats(),
+      ...this.getDHTStats()
+    };
+  }
+
+  /**
+   * DHT特定的错误处理
+   */
+  protected handleDHTError(operation: string, error: any, context?: any): void {
+    const networkError = new NetworkError(
+      `DHT operation failed: ${operation}`,
+      { operation, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
+    );
+    
+    super.handleError(operation, networkError, context);
+  }
+
+  /**
+   * 执行深度清理
+   */
+  protected performDeepCleanup(): void {
+    try {
+      this.stop();
+      this.removeAllListeners();
+      super.performDeepCleanup();
+    } catch (error) {
+      this.handleDHTError('performDeepCleanup', error);
+    }
+  }
+
+  /**
+   * 销毁管理器
+   */
+  destroy(): void {
+    this.stop();
+    this.removeAllListeners();
+  }
 }
+
+// 导出DHTManagerConfig类型
+export type { DHTManagerConfig } from '../types/dht';

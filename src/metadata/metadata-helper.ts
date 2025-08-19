@@ -1,13 +1,22 @@
-//@ts-nocheck
-const utils = require("../utils");
-const net = require('net');
-const ut_metadata = require('./ut_metadata');
+import * as utils from "../utils";
+import * as net from 'net';
+import ut_metadata from './ut_metadata';
 import Protocol from '../bittorrent-protocol';
-import bencode from "../bencode";
-const crypto = require('crypto');
-import { NetworkError, TimeoutError, MetadataError, ErrorType, ErrorSeverity } from '../utils/error-handler';
+import * as bencode from '../bencode';
+import * as crypto from 'crypto';
+import { NetworkError, TimeoutError, MetadataError, ErrorType, ErrorSeverity } from '../errors/error-types';
+import { Peer, ParsedMetadata } from '../types';
 
-export function fetch(target, config) {
+export interface MetadataFetchTarget {
+  infoHash: Buffer;
+  peer: Peer;
+}
+
+export interface MetadataFetchConfig {
+  downloadMaxTime?: number;
+}
+
+export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig): Promise<Buffer> {
     return new Promise((resolve, reject) => {
         // console.log('try fetching metadata', target);
         let peer = target.peer;
@@ -15,15 +24,15 @@ export function fetch(target, config) {
         const socket = net.createConnection(peer.port, peer.host || peer.address)
         socket.setTimeout(config.downloadMaxTime || 30000);
         socket.on('connect', () => {
-            const wire = new Protocol()
-            socket.pipe(wire).pipe(socket)
+            const wire = new Protocol() as any;
+            socket.pipe(wire as any).pipe(socket)
             // initialize the extension
-            wire.use(ut_metadata())
+            wire.use(ut_metadata(wire))
             // all `ut_metadata` functionality can now be accessed at wire.ut_metadata
             // handshake
             wire.handshake(infoHash, utils.getRandomId());
             // 'metadata' event will fire when the metadata arrives and is verified to be correct!
-            wire.ut_metadata.on('metadata', metadata => {
+            (wire as any).ut_metadata.on('metadata', (metadata: Buffer) => {
                 resolve(metadata);
                 socket.end();
                 wire.destroy();
@@ -31,7 +40,7 @@ export function fetch(target, config) {
 
             // optionally, listen to the 'warning' event if you want to know that metadata is
             // probably not going to arrive for one of the above reasons.
-            wire.ut_metadata.on('warning', err => {
+            (wire as any).ut_metadata.on('warning', (err: any) => {
                 reject(new MetadataError(
                     `Metadata warning: ${err.message || err}`,
                     {
@@ -39,19 +48,19 @@ export function fetch(target, config) {
                         peer: { host: peer.host, port: peer.port },
                         infoHash: infoHash.toString('hex')
                     },
-                    err instanceof Error ? err : new Error(String(err))
+                    true
                 ));
                 wire.destroy();
             })
 
             // handle handshake
-            wire.on('handshake', (infoHash, peerId) => {
+            wire.on('handshake', (infoHash: Buffer, peerId: Buffer) => {
                 // ask the peer to send us metadata
-                wire.ut_metadata.fetch()
+                (wire as any).ut_metadata.fetch()
             })
         });
 
-        socket.on('error', function (err) {
+        socket.on('error', function (err: Error) {
             socket.destroy();
             reject(new NetworkError(
                 `Socket error: ${err.message || err}`,
@@ -60,11 +69,11 @@ export function fetch(target, config) {
                     peer: { host: peer.host, port: peer.port },
                     infoHash: infoHash.toString('hex')
                 },
-                err instanceof Error ? err : new Error(String(err))
+                true
             ));
         });
 
-        socket.on('timeout', function (err) {
+        socket.on('timeout', function () {
             socket.destroy();
             reject(new TimeoutError(
                 `Connection timeout to ${peer.host}:${peer.port}`,
@@ -73,12 +82,11 @@ export function fetch(target, config) {
                     peer: { host: peer.host, port: peer.port },
                     infoHash: infoHash.toString('hex'),
                     timeoutMs: config.downloadMaxTime || 30000
-                },
-                err instanceof Error ? err : new Error(String(err))
+                }
             ));
         });
 
-        socket.once('close', function (hadError) {
+        socket.once('close', function (hadError: boolean) {
             //ignore
             if (hadError) {
                 reject(new NetworkError(
@@ -88,26 +96,27 @@ export function fetch(target, config) {
                         peer: { host: peer.host, port: peer.port },
                         infoHash: infoHash.toString('hex'),
                         hadError: true
-                    }
+                    },
+                    true
                 ));
             } else {
-                resolve(true);
+                resolve(Buffer.from('success'));
             }
         });
     });
 }
 
 
-export function parseMetaData(rawMetadata) {
-    let metadata = bencode.decode(rawMetadata);
+export function parseMetaData(rawMetadata: Buffer): ParsedMetadata {
+    let metadata = (bencode as any).decode(rawMetadata) as any;
     // metadata from bittorrent-protocol pkg is slightly different from the original
-    let infoHash = crypto.createHash('sha1').update(bencode.encode(metadata["info"])).digest();
+    let infoHash = crypto.createHash('sha1').update((bencode as any).encode(metadata["info"])).digest();
     let torrentType = "single";
-    let filePaths = [];
+    let filePaths: string[] = [];
     let size = 0;
     if (Object.prototype.toString.call(metadata.info.files) === "[object Array]") {
         torrentType = "multiple";
-        let arr = [];
+        let arr: string[] = [];
         for (let item of metadata.info.files) {
             try {
                 if (item['path']) {
@@ -126,7 +135,7 @@ export function parseMetaData(rawMetadata) {
     }
     else if (metadata.info.files) {
         if (metadata.info.files['path']) {
-            filePaths = metadata.info.files['path'].toString();
+            filePaths = [metadata.info.files['path'].toString()];
         }
     }
     else if (!metadata.info.files && metadata.info["length"]) {
@@ -138,7 +147,7 @@ export function parseMetaData(rawMetadata) {
         infoHash,
         name: metadata.info.name.toString(),
         size,
-        torrentType,
+        torrentType: torrentType as 'single' | 'multiple',
         filePaths,
         info: metadata.info,
         rawMetadata
