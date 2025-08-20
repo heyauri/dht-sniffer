@@ -502,6 +502,114 @@ export class MetadataConfigValidator extends BaseValidator<any> {
 }
 
 /**
+ * 对等节点配置验证器
+ */
+export class PeerConfigValidator extends BaseValidator<any> {
+  validate(config: any): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    try {
+      // 验证最大节点数
+      if (config.maxNodes !== undefined) {
+        try {
+          this.validateNumber(config.maxNodes, 1, 100000, 'maxNodes');
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+      // 验证连接超时
+      if (config.connectionTimeout !== undefined) {
+        try {
+          this.validateInterval(config.connectionTimeout, 'connectionTimeout', false, 1000);
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+      // 验证心跳间隔
+      if (config.heartbeatInterval !== undefined) {
+        try {
+          this.validateInterval(config.heartbeatInterval, 'heartbeatInterval', false, 1000);
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+    } catch (error) {
+      errors.push(`Unexpected validation error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings: warnings.length > 0 ? warnings : undefined
+    };
+  }
+}
+
+/**
+ * 错误处理配置验证器
+ */
+export class ErrorConfigValidator extends BaseValidator<any> {
+  validate(config: any): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    try {
+      // 验证错误处理开关
+      if (config.enableErrorHandling !== undefined) {
+        try {
+          this.validateBoolean(config.enableErrorHandling, 'enableErrorHandling');
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+      // 验证最大错误历史记录
+      if (config.maxErrorHistory !== undefined) {
+        try {
+          this.validateNumber(config.maxErrorHistory, 0, 10000, 'maxErrorHistory');
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+      // 验证错误报告级别
+      if (config.errorReportingLevel !== undefined) {
+        try {
+          this.validateNumber(config.errorReportingLevel, 0, 3, 'errorReportingLevel');
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            warnings.push(error.message);
+          }
+        }
+      }
+
+    } catch (error) {
+      errors.push(`Unexpected validation error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings: warnings.length > 0 ? warnings : undefined
+    };
+  }
+}
+
+/**
  * 配置验证管理器
  */
 export class ConfigValidatorManager {
@@ -512,6 +620,8 @@ export class ConfigValidatorManager {
     this.registerValidator('dht', new DHTConfigValidator());
     this.registerValidator('cache', new CacheConfigValidator());
     this.registerValidator('metadata', new MetadataConfigValidator());
+    this.registerValidator('peer', new PeerConfigValidator());
+    this.registerValidator('error', new ErrorConfigValidator());
   }
 
   /**

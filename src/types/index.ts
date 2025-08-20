@@ -32,13 +32,6 @@ import {
   ErrorHandler as ErrorHandlerInterface,
   ErrorStats,
   ErrorReport,
-  SocketError,
-  ConnectionRefusedError,
-  DNSResolutionError,
-  ProtocolError,
-  HandshakeError,
-  DataCorruptedError,
-  NodeUnreachableError,
   isAppError
 } from './error';
 
@@ -47,13 +40,6 @@ export {
   ErrorHandlerInterface as ErrorHandler,
   ErrorStats,
   ErrorReport,
-  SocketError,
-  ConnectionRefusedError,
-  DNSResolutionError,
-  ProtocolError,
-  HandshakeError,
-  DataCorruptedError,
-  NodeUnreachableError,
   isAppError
 };
 

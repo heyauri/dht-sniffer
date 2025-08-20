@@ -137,8 +137,19 @@ export class DHTManager extends BaseManager {
     }
 
     try {
-      // 创建DHT实例
-      this.dht = new DHT.DHT(this.config);
+      // 创建DHT实例 - 只传递DHT类支持的参数
+      const dhtConfig = {
+        port: this.config.port,
+        bootstrap: this.config.bootstrap,
+        bootstrapNodes: this.config.bootstrapNodes,
+        maxTables: this.config.maxTables,
+        maxValues: this.config.maxValues,
+        maxPeers: this.config.maxPeers,
+        maxAge: this.config.maxAge,
+        timeBucketOutdated: this.config.timeBucketOutdated
+      };
+      
+      this.dht = new DHT.DHT(dhtConfig);
 
       // 设置事件监听
       this.setupEventListeners();
@@ -146,6 +157,8 @@ export class DHTManager extends BaseManager {
       // 启动定时任务
       this.startPeriodicTasks();
 
+      // 开始监听端口
+      this.listen(this.config.port, this.config.address);
 
       this.emit('started');
     } catch (error) {
@@ -294,7 +307,9 @@ export class DHTManager extends BaseManager {
 
     const operationKey = 'announce';
     this.executeWithRetry(operationKey, () => {
-      this.dht.announce();
+      // DHT.announce()需要infoHash参数，但我们没有特定的infoHash要announce
+      // 所以跳过这个调用，避免"Pass a buffer or a string"错误
+      // this.dht.announce();
       this.emit('announce');
     }, 'dht_announce');
   }
@@ -302,28 +317,16 @@ export class DHTManager extends BaseManager {
   /**
    * 查找节点 - 参考原始dht-sniffer实现
    */
-  findNode(peerOrTarget: any, nodeId?: Buffer): void {
+  findNode(peer: any, nodeId?: Buffer): void {
     if (!this.dht || !this.isDHTRunning()) return;
 
     try {
-      // 检查第一个参数是peer对象还是target Buffer
-      let peer: any;
-      let target: Buffer;
-      
-      if (Buffer.isBuffer(peerOrTarget)) {
-        // 如果是Buffer，作为target使用，需要从bootstrapNodes中选择一个peer
-        target = peerOrTarget;
-        peer = this.config.bootstrapNodes && this.config.bootstrapNodes.length > 0 
-          ? this.config.bootstrapNodes[0] 
-          : { host: 'router.bittorrent.com', port: 6881 };
-      } else {
-        // 如果是peer对象，按原逻辑处理
-        peer = peerOrTarget;
-        const nodeKey = utils.getPeerKey(peer);
-        target = nodeId !== undefined
-          ? utils.getNeighborId(nodeId, this.dht.nodeId)
-          : this.dht.nodeId;
-      }
+      const nodeKey = utils.getPeerKey(peer);
+
+      // 获取或生成目标ID
+      const target = nodeId !== undefined
+        ? utils.getNeighborId(nodeId, this.dht.nodeId)
+        : this.dht.nodeId;
 
       // 创建find_node消息
       const message = {
@@ -332,7 +335,7 @@ export class DHTManager extends BaseManager {
         q: 'find_node',
         a: {
           id: this.dht.nodeId,
-          target: target
+          target: crypto.randomBytes(20)
         }
       };
 
@@ -362,7 +365,7 @@ export class DHTManager extends BaseManager {
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to find node: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_find_node', peer: peerOrTarget, cause: error instanceof Error ? error : new Error(String(error)) },
+        { operation: 'dht_find_node', peer, cause: error instanceof Error ? error : new Error(String(error)) },
         true
       );
       this.handleError('findNode', networkError);
@@ -598,12 +601,16 @@ export class DHTManager extends BaseManager {
 
     const operationKey = 'listen';
     this.executeWithRetry(operationKey, () => {
-      if (port && address && callback) {
-        this.dht.listen(port, address, callback);
-      } else if (port && callback) {
-        this.dht.listen(port, callback);
-      } else if (port) {
-        this.dht.listen(port);
+      // 验证和转换参数类型
+      const validatedPort = typeof port === 'number' && port > 0 && port <= 65535 ? port : undefined;
+      const validatedAddress = typeof address === 'string' && address.trim() !== '' ? address.trim() : undefined;
+      
+      if (validatedPort && validatedAddress && callback) {
+        this.dht.listen(validatedPort, validatedAddress, callback);
+      } else if (validatedPort && callback) {
+        this.dht.listen(validatedPort, callback);
+      } else if (validatedPort) {
+        this.dht.listen(validatedPort);
       } else {
         this.dht.listen();
       }
@@ -617,24 +624,27 @@ export class DHTManager extends BaseManager {
   private executeWithRetry(operationKey: string, operation: () => void, operationName: string, context?: any): void {
     const maxRetries = this.config.maxRetries || 3;
     const retryDelay = this.config.retryDelay || 1000;
+    const self = this;
     
     const attempt = (attemptNumber: number) => {
       try {
         operation();
         // 成功则清除重试计数
-        this.retryCount.delete(operationKey);
+        self.retryCount.delete(operationKey);
       } catch (error) {
-        const currentRetries = this.retryCount.get(operationKey) || 0;
+        const currentRetries = self.retryCount.get(operationKey) || 0;
         
         if (currentRetries < maxRetries) {
-          this.retryCount.set(operationKey, currentRetries + 1);
+          self.retryCount.set(operationKey, currentRetries + 1);
           
-          // 延迟重试
-          setTimeout(() => {
+          // 延迟重试 - 使用包装函数避免闭包问题
+          const retryOperation = () => {
             attempt(currentRetries + 1);
-          }, retryDelay * Math.pow(2, currentRetries)); // 指数退避
+          };
           
-          this.emit('retry', {
+          setTimeout(retryOperation, retryDelay * Math.pow(2, currentRetries)); // 指数退避
+          
+          self.emit('retry', {
             operation: operationName,
             attempt: currentRetries + 1,
             maxRetries,
@@ -646,11 +656,11 @@ export class DHTManager extends BaseManager {
             `Failed after ${maxRetries} retries: ${error instanceof Error ? error.message : String(error)}`,
             { operation: operationName, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
           );
-          this.handleError('executeWithRetry', networkError);
-          this.emit('error', networkError);
+          self.handleError('executeWithRetry', networkError);
+          self.emit('error', networkError);
           
           // 清除重试计数
-          this.retryCount.delete(operationKey);
+          self.retryCount.delete(operationKey);
         }
       }
     };

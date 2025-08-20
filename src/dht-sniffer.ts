@@ -95,11 +95,14 @@ export class DHTSniffer extends EventEmitter {
     this.lastRestartTime = 0;
     this.isShuttingDown = false;
 
+    // 将扁平配置转换为分组配置结构
+    const groupedConfig = this.transformConfigForValidation(this.config);
+    
     // 初始化架构组件
     this.initializeArchitectureComponents();
 
-    // 初始化业务组件
-    this.initializeBusinessComponents();
+    // 使用分组配置初始化业务组件
+    this.initializeBusinessComponentsWithConfig(groupedConfig);
 
     // 设置事件监听
     this.setupEventListeners();
@@ -112,27 +115,11 @@ export class DHTSniffer extends EventEmitter {
     // 初始化配置验证器
     this.configValidator = new ConfigValidatorManager();
     
-    // 验证配置 - 将扁平配置转换为验证器期望的结构
-    const structuredConfig = {
-      dht: {
-        port: this.config.port,
-        nodesMaxSize: this.config.nodesMaxSize,
-        refreshPeriod: this.config.refreshPeriod,
-        announcePeriod: this.config.announcePeriod,
-        address: this.config.address,
-        bootstrap: this.config.bootstrap
-      },
-      cache: this.config.cacheConfig || {},
-      metadata: {
-        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent,
-        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize,
-        downloadMaxTime: this.config.downloadMaxTime,
-        ignoreFetched: this.config.ignoreFetched,
-        aggressiveLevel: this.config.aggressiveLevel
-      }
-    };
+    // 将扁平配置转换为分组配置结构进行验证
+    const groupedConfig = this.transformConfigForValidation(this.config);
     
-    const validationResult = this.configValidator.validateAll(structuredConfig);
+    // 验证配置
+    const validationResult = this.configValidator.validateAll(groupedConfig);
     const hasErrors = Object.values(validationResult).some(result => !result.isValid);
     if (hasErrors) {
       const errorMessages = Object.entries(validationResult)
@@ -145,41 +132,31 @@ export class DHTSniffer extends EventEmitter {
     // 初始化事件总线
     this.eventBus = createDefaultEventBus();
 
-    // 初始化依赖注入容器 - 重新组织配置结构
-    const containerConfig = {
-      dht: {
-        port: this.config.port,
-        nodesMaxSize: this.config.nodesMaxSize,
-        refreshPeriod: this.config.refreshPeriod,
-        announcePeriod: this.config.announcePeriod,
-        address: this.config.address,
-        bootstrap: this.config.bootstrap
-      },
-      cache: this.config.cacheConfig || {
-        fetchedTupleSize: 1000,
-        fetchedInfoHashSize: 5000,
-        findNodeCacheSize: 2000,
-        latestCalledPeersSize: 1000,
-        usefulPeersSize: 5000,
-        metadataFetchingCacheSize: 1000
-      },
-      metadata: {
-        maximumParallelFetchingTorrent: this.config.maximumParallelFetchingTorrent,
-        maximumWaitingQueueSize: this.config.maximumWaitingQueueSize,
-        downloadMaxTime: this.config.downloadMaxTime,
-        ignoreFetched: this.config.ignoreFetched,
-        aggressiveLevel: this.config.aggressiveLevel
-      },
-      peer: {},
-      errorMonitorConfig: this.config.errorMonitorConfig || {}
-    };
-    this.container = createDefaultContainer(containerConfig);
+    // 初始化依赖注入容器
+    this.container = createDefaultContainer(this.config);
   }
 
   /**
    * 初始化业务组件
    */
   private initializeBusinessComponents(): void {
+    // 从容器获取组件实例
+    this.errorHandler = this.container.get<ErrorHandlerImpl>('errorHandler');
+    this.errorMonitor = this.container.get<ErrorMonitor>('errorMonitor');
+    this.cacheManager = this.container.get<CacheManager>('cacheManager');
+    this.peerManager = this.container.get<PeerManager>('peerManager');
+    this.metadataManager = this.container.get<MetadataManager>('metadataManager');
+    this.dhtManager = this.container.get<DHTManager>('dhtManager');
+  }
+
+  /**
+   * 使用分组配置初始化业务组件
+   * @param groupedConfig 分组配置对象
+   */
+  private initializeBusinessComponentsWithConfig(groupedConfig: any): void {
+    // 使用分组配置创建容器
+    this.container = createDefaultContainer(groupedConfig);
+    
     // 从容器获取组件实例
     this.errorHandler = this.container.get<ErrorHandlerImpl>('errorHandler');
     this.errorMonitor = this.container.get<ErrorMonitor>('errorMonitor');
@@ -558,6 +535,92 @@ export class DHTSniffer extends EventEmitter {
    */
   getConfigValidator(): ConfigValidatorManager {
     return this.configValidator;
+  }
+
+  /**
+   * 将扁平配置转换为分组配置结构用于验证
+   * @param config 扁平配置对象
+   * @returns 分组配置对象
+   */
+  private transformConfigForValidation(config: any): any {
+    const groupedConfig: any = {
+      dht: {},
+      metadata: {},
+      cache: {},
+      peer: {},
+      error: {}
+    };
+
+    // DHT相关配置
+    if (config.port !== undefined) groupedConfig.dht.port = config.port;
+    if (config.nodesMaxSize !== undefined) groupedConfig.dht.nodesMaxSize = config.nodesMaxSize;
+    if (config.refreshPeriod !== undefined) groupedConfig.dht.refreshPeriod = config.refreshPeriod;
+    if (config.announcePeriod !== undefined) groupedConfig.dht.announcePeriod = config.announcePeriod;
+    if (config.bootstrapNodes !== undefined) groupedConfig.dht.bootstrap = config.bootstrapNodes;
+    
+    // 元数据相关配置
+    if (config.maximumParallelFetchingTorrent !== undefined) groupedConfig.metadata.maximumParallelFetchingTorrent = config.maximumParallelFetchingTorrent;
+    if (config.maximumWaitingQueueSize !== undefined) groupedConfig.metadata.maximumWaitingQueueSize = config.maximumWaitingQueueSize;
+    if (config.downloadMaxTime !== undefined) groupedConfig.metadata.downloadMaxTime = config.downloadMaxTime;
+    if (config.ignoreFetched !== undefined) groupedConfig.metadata.ignoreFetched = config.ignoreFetched;
+    if (config.aggressiveLevel !== undefined) groupedConfig.metadata.aggressiveLevel = config.aggressiveLevel;
+    
+    // 缓存相关配置
+    if (config.maxSize !== undefined) groupedConfig.cache.maxSize = config.maxSize;
+    if (config.ttl !== undefined) groupedConfig.cache.ttl = config.ttl;
+    
+    // 确保缓存配置包含必需的参数
+    groupedConfig.cache.fetchedTupleSize = config.fetchedTupleSize || 1000;
+    groupedConfig.cache.fetchedInfoHashSize = config.fetchedInfoHashSize || 5000;
+    groupedConfig.cache.findNodeCacheSize = config.findNodeCacheSize || 2000;
+    groupedConfig.cache.latestCalledPeersSize = config.latestCalledPeersSize || 1000;
+    groupedConfig.cache.usefulPeersSize = config.usefulPeersSize || 5000;
+    groupedConfig.cache.metadataFetchingCacheSize = config.metadataFetchingCacheSize || 1000;
+    
+    // 对等节点相关配置
+    if (config.maxNodes !== undefined) groupedConfig.peer.maxNodes = config.maxNodes;
+    
+    // 错误处理相关配置
+    if (config.enableErrorHandling !== undefined) groupedConfig.error.enableErrorHandling = config.enableErrorHandling;
+    if (config.maxErrorHistory !== undefined) groupedConfig.error.maxErrorHistory = config.maxErrorHistory;
+    
+    // 系统相关配置
+    if (config.enablePerformanceMonitoring !== undefined) {
+      groupedConfig.dht.enablePerformanceMonitoring = config.enablePerformanceMonitoring;
+      groupedConfig.metadata.enablePerformanceMonitoring = config.enablePerformanceMonitoring;
+    }
+    if (config.performanceMonitoringInterval !== undefined) {
+      groupedConfig.dht.performanceMonitoringInterval = config.performanceMonitoringInterval;
+      groupedConfig.metadata.performanceMonitoringInterval = config.performanceMonitoringInterval;
+    }
+    if (config.enableHealthCheck !== undefined) {
+      groupedConfig.dht.enableHealthCheck = config.enableHealthCheck;
+      groupedConfig.metadata.enableHealthCheck = config.enableHealthCheck;
+    }
+    if (config.healthCheckInterval !== undefined) {
+      groupedConfig.dht.healthCheckInterval = config.healthCheckInterval;
+      groupedConfig.metadata.healthCheckInterval = config.healthCheckInterval;
+    }
+    if (config.gracefulShutdownTimeout !== undefined) {
+      groupedConfig.dht.gracefulShutdownTimeout = config.gracefulShutdownTimeout;
+      groupedConfig.metadata.gracefulShutdownTimeout = config.gracefulShutdownTimeout;
+    }
+    if (config.maxMemoryUsage !== undefined) {
+      groupedConfig.dht.memoryThreshold = config.maxMemoryUsage;
+      groupedConfig.metadata.memoryThreshold = config.maxMemoryUsage;
+      groupedConfig.cache.memoryThreshold = config.maxMemoryUsage;
+      groupedConfig.peer.memoryThreshold = config.maxMemoryUsage;
+    }
+    if (config.enableAutoRestart !== undefined) {
+      groupedConfig.dht.enableAutoRestart = config.enableAutoRestart;
+      groupedConfig.metadata.enableAutoRestart = config.enableAutoRestart;
+    }
+    if (config.restartDelay !== undefined) {
+      groupedConfig.dht.restartDelay = config.restartDelay;
+      groupedConfig.metadata.restartDelay = config.restartDelay;
+    }
+
+    return groupedConfig;
   }
 
   /**

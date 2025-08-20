@@ -30,10 +30,11 @@ sniffer.on('node', node => {
     console.log('find node', node);
 });
 sniffer.on('warning', err => {
-    // console.error(err);
+    console.error('WARNING:', err);
 });
 sniffer.on('error', err => {
-    // console.error(err);
+    console.error('ERROR:', err);
+    console.error('ERROR STACK:', err.stack);
 });
 
 let timestamp = Date.now();

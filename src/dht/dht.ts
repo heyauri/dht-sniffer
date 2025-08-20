@@ -167,7 +167,17 @@ class DHT extends EventEmitter {
         const self = this
 
         this._checkNodes(nodes, true, (_, node) => {
-            if (node) self.removeNode(node.id)
+            if (node) {
+                // 确保 node.id 是 Buffer 或 string 类型
+                if (node.id) {
+                    if (Buffer.isBuffer(node.id) || typeof node.id === 'string') {
+                        self.removeNode(node.id)
+                    } else {
+                        // 调试信息：打印 node.id 的类型和值
+                        console.log('Invalid node.id type:', typeof node.id, 'value:', node.id)
+                    }
+                }
+            }
             cb(null, node)
         })
     }
