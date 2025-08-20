@@ -1,64 +1,18 @@
 import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 import * as DHT from '../dht/dht';
-import * as utils from '../utils';
+import { getPeerKey, getNeighborId, isNodeId, parseNodes } from '../utils/dht-utils';
+import { shuffle } from '../utils/array-utils';
 import { NetworkError, ValidationError } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { PeerManager } from './peer-manager';
 import { DHTOptions, Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
+import { dhtConfigValidationRules } from './common/config-mixin';
 
 
 
-/**
- * 验证DHT管理器配置
- * @param config 要验证的配置
- * @throws ValidationError 当配置无效时抛出
- */
-function validateConfig(config: DHTManagerConfig): void {
-  // 验证address（如果提供）
-  if (config.address !== undefined && (typeof config.address !== 'string' || config.address.trim() === '')) {
-    throw new ValidationError('address must be a non-empty string if provided', { field: 'address', value: config.address });
-  }
 
-  // 验证port
-  if (config.port !== undefined) {
-    if (typeof config.port !== 'number' || config.port < 1 || config.port > 65535) {
-      throw new ValidationError('port must be a number between 1 and 65535', { field: 'port', value: config.port });
-    }
-  }
-
-  // 验证nodesMaxSize
-  if (typeof config.nodesMaxSize !== 'number' || config.nodesMaxSize < 1) {
-    throw new ValidationError('nodesMaxSize must be a positive number', { field: 'nodesMaxSize', value: config.nodesMaxSize });
-  }
-
-  // 验证refreshPeriod
-  if (typeof config.refreshPeriod !== 'number' || config.refreshPeriod < 1000) {
-    throw new ValidationError('refreshPeriod must be at least 1000ms', { field: 'refreshPeriod', value: config.refreshPeriod });
-  }
-
-  // 验证announcePeriod
-  if (typeof config.announcePeriod !== 'number' || config.announcePeriod < 1000) {
-    throw new ValidationError('announcePeriod must be at least 1000ms', { field: 'announcePeriod', value: config.announcePeriod });
-  }
-
-  // 验证bootstrap
-  if (config.bootstrap !== undefined) {
-    if (typeof config.bootstrap !== 'boolean' && !Array.isArray(config.bootstrap)) {
-      throw new ValidationError('bootstrap must be a boolean or string array', { field: 'bootstrap', value: config.bootstrap });
-    }
-    
-    if (Array.isArray(config.bootstrap)) {
-      for (let i = 0; i < config.bootstrap.length; i++) {
-        const node = config.bootstrap[i];
-        if (typeof node !== 'string') {
-          throw new ValidationError(`bootstrap[${i}] must be a string`, { field: `bootstrap[${i}]`, value: node });
-        }
-      }
-    }
-  }
-}
 
 // 引导节点
 const bootstrapNodes: Node[] = [
@@ -90,24 +44,11 @@ export class DHTManager extends BaseManager {
   private refreshInterval: NodeJS.Timeout | null;
   private announceInterval: NodeJS.Timeout | null;
   private memoryCleanupInterval: NodeJS.Timeout | null;
-  private retryCount: Map<string, number>;
 
   constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager) {
     super(config, errorHandler);
     
     this.peerManager = peerManager;
-    
-    // 验证配置
-    try {
-      validateConfig(config);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        this.handleError('validateConfig', error);
-        throw error;
-      }
-      this.handleError('validateConfig', error instanceof Error ? error : new Error(String(error)));
-      throw error;
-    }
     
     // 设置默认配置
     this.config = Object.assign({
@@ -125,7 +66,6 @@ export class DHTManager extends BaseManager {
     this.refreshInterval = null;
     this.announceInterval = null;
     this.memoryCleanupInterval = null;
-    this.retryCount = new Map();
   }
 
   /**
@@ -188,9 +128,6 @@ export class DHTManager extends BaseManager {
         this.dht.destroy();
         this.dht = null;
       }
-      
-      // 清理重试计数
-      this.retryCount.clear();
 
 
       this.emit('stopped');
@@ -206,7 +143,7 @@ export class DHTManager extends BaseManager {
   /**
    * 设置事件监听器
    */
-  private setupEventListeners(): void {
+  public setupEventListeners(): void {
     if (!this.dht) return;
 
     // 监听节点事件
@@ -254,7 +191,10 @@ export class DHTManager extends BaseManager {
 
     // 定期announce
     this.announceInterval = setInterval(() => {
-      this.announce();
+      // 使用默认的infoHash和port进行announce
+      const defaultInfoHash = this.config.defaultInfoHash || crypto.randomBytes(20).toString('hex');
+      const defaultPort = this.config.defaultPort || 6881;
+      this.announce(defaultInfoHash, defaultPort);
     }, this.config.announcePeriod);
     
     // 定期内存清理
@@ -292,26 +232,39 @@ export class DHTManager extends BaseManager {
     if (!this.dht || !this.isDHTRunning()) return;
 
     const operationKey = 'refreshNodes';
-    this.executeWithRetry(operationKey, () => {
+    this.executeWithRetry(async () => {
       // dht类没有refresh方法，使用bootstrap来刷新网络连接
       this.dht._bootstrap(true);
       this.emit('refresh');
-    }, 'dht_refresh');
+    }, operationKey);
   }
 
   /**
-   * Announce
+   * 向DHT网络声明资源
    */
-  private announce(): void {
-    if (!this.dht || !this.isDHTRunning()) return;
-
-    const operationKey = 'announce';
-    this.executeWithRetry(operationKey, () => {
-      // DHT.announce()需要infoHash参数，但我们没有特定的infoHash要announce
-      // 所以跳过这个调用，避免"Pass a buffer or a string"错误
-      // this.dht.announce();
-      this.emit('announce');
-    }, 'dht_announce');
+  public announce(infoHash: string, port: number, callback?: (err: Error | null) => void): void {
+    if (!this.isDHTRunning()) {
+      const error = new NetworkError('DHT is not running', { operation: 'announce', infoHash });
+      this.handleError('announce', error);
+      if (callback) callback(error);
+      return;
+    }
+    
+    this.executeWithRetry(
+      async () => {
+        this.dht!.announce(infoHash, port, (err: Error | null) => {
+          if (err) {
+            this.handleError('announce', err, { infoHash, port });
+            if (callback) callback(err);
+          } else {
+            this.emit('announce', { infoHash, port });
+            if (callback) callback(null);
+          }
+        });
+      },
+      'announce',
+      { infoHash, port }
+    );
   }
 
   /**
@@ -321,11 +274,11 @@ export class DHTManager extends BaseManager {
     if (!this.dht || !this.isDHTRunning()) return;
 
     try {
-      const nodeKey = utils.getPeerKey(peer);
+      const nodeKey = getPeerKey(peer);
 
       // 获取或生成目标ID
       const target = nodeId !== undefined
-        ? utils.getNeighborId(nodeId, this.dht.nodeId)
+        ? getNeighborId(nodeId, this.dht.nodeId)
         : this.dht.nodeId;
 
       // 创建find_node消息
@@ -342,7 +295,7 @@ export class DHTManager extends BaseManager {
       // 发送查询
       this.dht._rpc.query(peer, message, (err: any, reply: any) => {
         try {
-          if (peer && peer.id && this.dht._rpc.nodes.get(peer.id) && utils.isNodeId(peer.id, 20)) {
+          if (peer && peer.id && this.dht._rpc.nodes.get(peer.id) && isNodeId(peer.id, 20)) {
             if (err && (err.code === 'EUNEXPECTEDNODE' || err.code === 'ETIMEDOUT')) {
               this.dht._rpc.remove(peer.id);
             }
@@ -352,9 +305,9 @@ export class DHTManager extends BaseManager {
         }
 
         if (reply && reply.r && reply.r.nodes) {
-          const nodes = utils.parseNodes(reply.r.nodes, 20);
+          const nodes = parseNodes(reply.r.nodes, 20);
           for (const node of nodes) {
-            if (utils.isNodeId(node.id, 20)) {
+            if (isNodeId(node.id, 20)) {
               this.peerManager.importPeer(node);
             }
           }
@@ -599,8 +552,7 @@ export class DHTManager extends BaseManager {
   listen(port?: number, address?: string, callback?: () => void): void {
     if (!this.dht) return;
 
-    const operationKey = 'listen';
-    this.executeWithRetry(operationKey, () => {
+    this.executeWithRetry(async () => {
       // 验证和转换参数类型
       const validatedPort = typeof port === 'number' && port > 0 && port <= 65535 ? port : undefined;
       const validatedAddress = typeof address === 'string' && address.trim() !== '' ? address.trim() : undefined;
@@ -615,58 +567,10 @@ export class DHTManager extends BaseManager {
         this.dht.listen();
       }
       this.emit('listening');
-    }, 'dht_listen', { port, address });
+    }, 'listen', { port, address });
   }
   
-  /**
-   * 带重试机制的执行器
-   */
-  private executeWithRetry(operationKey: string, operation: () => void, operationName: string, context?: any): void {
-    const maxRetries = this.config.maxRetries || 3;
-    const retryDelay = this.config.retryDelay || 1000;
-    const self = this;
-    
-    const attempt = (attemptNumber: number) => {
-      try {
-        operation();
-        // 成功则清除重试计数
-        self.retryCount.delete(operationKey);
-      } catch (error) {
-        const currentRetries = self.retryCount.get(operationKey) || 0;
-        
-        if (currentRetries < maxRetries) {
-          self.retryCount.set(operationKey, currentRetries + 1);
-          
-          // 延迟重试 - 使用包装函数避免闭包问题
-          const retryOperation = () => {
-            attempt(currentRetries + 1);
-          };
-          
-          setTimeout(retryOperation, retryDelay * Math.pow(2, currentRetries)); // 指数退避
-          
-          self.emit('retry', {
-            operation: operationName,
-            attempt: currentRetries + 1,
-            maxRetries,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        } else {
-          // 重试次数用完，报错
-          const networkError = new NetworkError(
-            `Failed after ${maxRetries} retries: ${error instanceof Error ? error.message : String(error)}`,
-            { operation: operationName, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
-          );
-          self.handleError('executeWithRetry', networkError);
-          self.emit('error', networkError);
-          
-          // 清除重试计数
-          self.retryCount.delete(operationKey);
-        }
-      }
-    };
-    
-    attempt(0);
-  }
+
   
   /**
    * 执行内存清理
@@ -689,6 +593,8 @@ export class DHTManager extends BaseManager {
       
       // 执行清理操作
       this.cleanupMemory();
+      // 使用BaseManager的通用内存清理功能
+      super.performMemoryCleanup();
     }
   }
   
@@ -751,7 +657,6 @@ export class DHTManager extends BaseManager {
       rss: memoryUsage.rss,
       threshold,
       usagePercentage: Math.round((memoryUsage.heapUsed / threshold) * 100),
-      retryCounts: Object.fromEntries(this.retryCount),
       isMemoryWarning: memoryUsage.heapUsed > threshold
     };
   }

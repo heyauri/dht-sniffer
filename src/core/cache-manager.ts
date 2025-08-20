@@ -3,6 +3,9 @@ import { ErrorHandlerImpl } from '../errors/error-handler';
 import { CacheError } from '../types/error';
 import { CacheConfig, CacheStats } from '../types/cache';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
+import { ValidationRule } from './common/config-validator';
+import { CacheAccessHelper, CacheAccessHelperFactory, CacheAccessConfig } from './common/cache-access-helper';
+import { cacheConfigValidationRules } from './common/config-mixin';
 
 /**
  * 扩展的内存使用情况接口，包含缓存内存信息
@@ -30,16 +33,18 @@ export class CacheManager extends BaseManager {
   
   private counter: CacheStats;
   protected config: CacheManagerExtendedConfig;
-  private cacheAccessHistory: Map<string, { count: number; lastAccess: number }>;
-  private circuitBreakerState: Map<string, { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' }>;
-  private retryAttempts: Map<string, number>;
   private compressedCache: Map<string, Buffer>;
+  
+  // 缓存访问助手
+  private fetchedTupleHelper: CacheAccessHelper;
+  private fetchedInfoHashHelper: CacheAccessHelper;
+  private findNodeCacheHelper: CacheAccessHelper;
+  private latestCalledPeersHelper: CacheAccessHelper;
+  private usefulPeersHelper: CacheAccessHelper;
+  private metadataFetchingHelper: CacheAccessHelper;
   
   constructor(config: CacheManagerExtendedConfig, errorHandler?: ErrorHandlerImpl) {
     super(config, errorHandler);
-    
-    // 验证配置
-    this.validateConfig(config);
     
     // 设置缓存特定默认配置
     this.config = {
@@ -56,11 +61,9 @@ export class CacheManager extends BaseManager {
       ...config
     };
     
-    // 初始化熔断器状态
-    this.circuitBreakerState = new Map();
-    this.retryAttempts = new Map();
     this.compressedCache = new Map();
     
+    // 初始化缓存实例
     this.fetchedTuple = new LRUCache({ 
       max: this.config.fetchedTupleSize, 
       ttl: 3 * 60 * 60 * 1000 
@@ -91,6 +94,52 @@ export class CacheManager extends BaseManager {
       ttl: 20 * 1000 
     });
     
+    // 初始化缓存访问助手
+    const cacheAccessConfig: CacheAccessConfig = {
+      cacheName: 'default',
+      enableCompression: this.config.enableCompression,
+      compressionThreshold: this.config.compressionThreshold,
+      maxRetryAttempts: this.config.maxRetryAttempts,
+      circuitBreakerThreshold: this.config.circuitBreakerThreshold,
+    };
+    
+    // 创建缓存访问助手
+    const fetchedTupleConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'fetchedTuple'
+    };
+    this.fetchedTupleHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, fetchedTupleConfig);
+    
+    const fetchedInfoHashConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'fetchedInfoHash'
+    };
+    this.fetchedInfoHashHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, fetchedInfoHashConfig);
+    
+    const findNodeCacheConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'findNodeCache'
+    };
+    this.findNodeCacheHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, findNodeCacheConfig);
+    
+    const latestCalledPeersConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'latestCalledPeers'
+    };
+    this.latestCalledPeersHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, latestCalledPeersConfig);
+    
+    const usefulPeersConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'usefulPeers'
+    };
+    this.usefulPeersHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, usefulPeersConfig);
+    
+    const metadataFetchingConfig: CacheAccessConfig = {
+      ...cacheAccessConfig,
+      cacheName: 'metadataFetchingCache'
+    };
+    this.metadataFetchingHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, metadataFetchingConfig);
+    
     this.counter = {
       fetchedTupleHit: 0,
       fetchedInfoHashHit: 0,
@@ -106,8 +155,6 @@ export class CacheManager extends BaseManager {
       preheatingEvents: 0,
       totalSize: 0
     };
-    
-    this.cacheAccessHistory = new Map();
   }
   
   /**
@@ -122,12 +169,8 @@ export class CacheManager extends BaseManager {
    * @param key 缓存键
    * @returns 缓存值或undefined
    */
-  getFetchedTupleValue(key: string): number | undefined {
-    return this.executeWithCircuitBreaker('fetchedTuple', key, () => {
-      const value = this.fetchedTuple.get(key);
-      this.recordCacheAccess('fetchedTuple', key, value !== undefined);
-      return value;
-    });
+  async getFetchedTupleValue(key: string): Promise<number | undefined> {
+    return this.fetchedTupleHelper.getWithRetry(this.fetchedTuple, key);
   }
   
   /**
@@ -142,12 +185,8 @@ export class CacheManager extends BaseManager {
    * @param key 缓存键
    * @returns 缓存值或undefined
    */
-  getFetchedInfoHashValue(key: string): number | undefined {
-    return this.executeWithCircuitBreaker('fetchedInfoHash', key, () => {
-      const value = this.fetchedInfoHash.get(key);
-      this.recordCacheAccess('fetchedInfoHash', key, value !== undefined);
-      return value;
-    });
+  async getFetchedInfoHashValue(key: string): Promise<number | undefined> {
+    return this.fetchedInfoHashHelper.getWithRetry(this.fetchedInfoHash, key);
   }
   
   /**
@@ -485,6 +524,13 @@ export class CacheManager extends BaseManager {
   }
   
   /**
+   * 重置所有熔断器状态
+   */
+  private resetAllCircuitBreakers(): void {
+    this.circuitBreakerState.clear();
+  }
+
+  /**
    * 执行深度清理
    */
   protected performDeepCleanup(): void {
@@ -505,79 +551,9 @@ export class CacheManager extends BaseManager {
     }
   }
   
-  /**
-   * 带熔断器的缓存操作执行器
-   */
-  private executeWithCircuitBreaker<T>(cacheName: string, key: string, operation: () => T): T | undefined {
-    if (!this.config.enableErrorHandling) {
-      return operation();
-    }
-    
-    const circuitKey = `${cacheName}:${key}`;
-    const state = this.getCircuitBreakerState(circuitKey);
-    
-    if (state.state === 'OPEN') {
-      // 熔断器开启，快速失败
-      this.emit('circuitBreakerOpen', { cacheName, key });
-      return undefined;
-    }
-    
-    try {
-      const result = operation();
-      
-      // 成功执行，重置熔断器状态
-      if (state.state === 'HALF_OPEN') {
-        this.resetCircuitBreaker(circuitKey);
-        this.emit('circuitBreakerReset', { cacheName, key });
-      }
-      
-      return result;
-    } catch (error) {
-      this.handleCircuitBreakerFailure(circuitKey, state);
-      this.handleError('executeWithCircuitBreaker', error, { cacheName, key });
-      return undefined;
-    }
-  }
+
   
-  /**
-   * 获取熔断器状态
-   */
-  private getCircuitBreakerState(key: string): { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' } {
-    const threshold = this.config.circuitBreakerThreshold || 5;
-    const state = this.circuitBreakerState.get(key) || { failures: 0, lastFailure: 0, state: 'CLOSED' as const };
-    
-    // 检查是否需要从OPEN状态转换为HALF_OPEN
-    if (state.state === 'OPEN' && Date.now() - state.lastFailure > 60000) { // 1分钟后尝试恢复
-      state.state = 'HALF_OPEN';
-      this.circuitBreakerState.set(key, state);
-    }
-    
-    return state;
-  }
-  
-  /**
-   * 处理熔断器失败
-   */
-  private handleCircuitBreakerFailure(key: string, state: { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' }): void {
-    state.failures++;
-    state.lastFailure = Date.now();
-    
-    const threshold = this.config.circuitBreakerThreshold || 5;
-    
-    if (state.failures >= threshold) {
-      state.state = 'OPEN';
-      this.emit('circuitBreakerTripped', { key, failures: state.failures });
-    }
-    
-    this.circuitBreakerState.set(key, state);
-  }
-  
-  /**
-   * 重置熔断器
-   */
-  private resetCircuitBreaker(key: string): void {
-    this.circuitBreakerState.set(key, { failures: 0, lastFailure: 0, state: 'CLOSED' });
-  }
+
   
   /**
    * 获取管理器名称
@@ -630,7 +606,7 @@ export class CacheManager extends BaseManager {
   /**
    * 验证配置
    */
-  protected validateConfig(config: BaseManagerConfig): void {
+  public validateConfig(config: CacheManagerExtendedConfig): void {
     const cacheConfig = config as CacheManagerExtendedConfig;
     
     if (cacheConfig.fetchedTupleSize !== undefined && (typeof cacheConfig.fetchedTupleSize !== 'number' || cacheConfig.fetchedTupleSize <= 0)) {
@@ -763,22 +739,7 @@ export class CacheManager extends BaseManager {
     };
   }
   
-  /**
-   * 获取熔断器状态统计
-   */
-  getCircuitBreakerStats(): Array<{
-    key: string;
-    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
-    failures: number;
-    lastFailure: number;
-  }> {
-    return Array.from(this.circuitBreakerState.entries()).map(([key, state]) => ({
-      key,
-      state: state.state,
-      failures: state.failures,
-      lastFailure: state.lastFailure
-    }));
-  }
+
 
   /**
    * 清理过期访问历史记录
@@ -812,11 +773,8 @@ export class CacheManager extends BaseManager {
       // 清理访问历史记录
       this.clearExpiredAccessHistory();
       
-      // 清理熔断器状态
-      this.cleanupCircuitBreakerStates();
-      
-      // 清理重试计数
-      this.cleanupRetryAttempts();
+      // 使用通用内存清理功能
+      this.performMemoryCleanup();
       
       this.emit('memoryCleaned');
     } catch (error) {
@@ -824,38 +782,11 @@ export class CacheManager extends BaseManager {
     }
   }
 
-  /**
-   * 清理熔断器状态
-   */
-  private cleanupCircuitBreakerStates(): void {
-    const now = Date.now();
-    const maxAge = 24 * 60 * 60 * 1000; // 24小时
-    
-    for (const [key, state] of this.circuitBreakerState.entries()) {
-      if (now - state.lastFailure > maxAge) {
-        this.circuitBreakerState.delete(key);
-      }
-    }
-  }
 
-  /**
-   * 清理重试计数
-   */
-  private cleanupRetryAttempts(): void {
-    for (const [key, attempts] of this.retryAttempts.entries()) {
-      if (attempts <= 0) {
-        this.retryAttempts.delete(key);
-      }
-    }
-  }
+
+
   
-  /**
-   * 重置所有熔断器
-   */
-  resetAllCircuitBreakers(): void {
-    this.circuitBreakerState.clear();
-    this.emit('allCircuitBreakersReset');
-  }
+  
   
   /**
    * 获取压缩缓存统计

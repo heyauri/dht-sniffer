@@ -8,6 +8,8 @@ import { Config } from '../types/config';
 import { Metadata } from '../types/metadata';
 import { MetadataWaitingItem, MetadataManagerConfig, MetadataStats } from '../types/metadata';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
+import { dhtConfigValidationRules } from './common/config-mixin';
+import { ErrorType } from '../types/error';
 import * as process from 'process';
 
 /**
@@ -25,18 +27,15 @@ export class MetadataManager extends BaseManager {
   private metadataWaitingQueues: MetadataWaitingItem[];
   private metadataFetchingDict: Record<string, number>;
   private aggressiveLimit: number;
-  private retryCount: Record<string, number>;
   private performanceMonitoringInterval?: NodeJS.Timeout;
   protected startTime: number;
   private totalFetchCount: number;
   private successFetchCount: number;
   private failedFetchCount: number;
+  private retryCount: Record<string, number>;
   
   constructor(config: MetadataManagerExtendedConfig, errorHandler: ErrorHandlerImpl, cacheManager: any) {
     super(config, errorHandler);
-    
-    // 验证配置
-    this.validateConfig(config);
     
     // 设置默认配置
     this.config = Object.assign({
@@ -164,11 +163,11 @@ export class MetadataManager extends BaseManager {
     const fetchStartTime = Date.now();
     
     try {
-      // 使用重试机制执行获取
+      // 使用通用重试机制执行获取
       const metadata = await this.executeWithRetry(
         () => metadataHelper.fetch({ infoHash, peer }, this.config),
-        infoHashStr,
-        peer
+        'fetchMetadata',
+        { infoHash: infoHashStr, peer: `${peer.host}:${peer.port}` }
       );
       
       if (metadata === undefined) return;
@@ -186,16 +185,12 @@ export class MetadataManager extends BaseManager {
         this.removeDuplicatedWaitingObjects(infoHashStr);
       }
       
-      // 重置重试计数
-      delete this.retryCount[infoHashStr];
-      
       // 记录成功获取时间
       const fetchTime = Date.now() - fetchStartTime;
       this.emit('fetchSuccess', {
         infoHash: infoHashStr,
         peer: { host: peer.host, port: peer.port },
-        fetchTime,
-        retryCount: this.retryCount[infoHashStr] || 0
+        fetchTime
       });
       
     } catch (error) {
@@ -317,7 +312,7 @@ export class MetadataManager extends BaseManager {
    */
   importWaitingQueue(arr: any[]): void {
     if (!arr || Object.prototype.toString.call(arr) !== '[object Array]') {
-      console.error('Not an array');
+      this.handleError('importWaitingQueue', new Error('Invalid input: not an array'), { errorType: ErrorType.VALIDATION });
       return;
     }
     
@@ -419,7 +414,7 @@ export class MetadataManager extends BaseManager {
   /**
    * 验证配置
    */
-  protected validateConfig(config: BaseManagerConfig): void {
+  public validateConfig(config: MetadataManagerConfig): void {
     const metadataConfig = config as MetadataManagerConfig;
     if (metadataConfig.maximumParallelFetchingTorrent < 1) {
       throw new Error('maximumParallelFetchingTorrent must be greater than 0');
@@ -446,98 +441,22 @@ export class MetadataManager extends BaseManager {
     }
   }
   
-  /**
-   * 带重试机制的执行器
-   */
-  private async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    infoHashStr: string,
-    peer: any
-  ): Promise<T> {
-    if (!this.config.enableRetry) {
-      return operation();
-    }
-    
-    let lastError: Error;
-    let attempt = 0;
-    const maxAttempts = this.config.maxRetries! + 1;
-    
-    // 初始化重试计数
-    if (!this.retryCount[infoHashStr]) {
-      this.retryCount[infoHashStr] = 0;
-    }
-    
-    while (attempt < maxAttempts) {
-      try {
-        const result = await Promise.race([
-          operation(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new TimeoutError('Metadata fetch timeout')), this.config.requestTimeout)
-          )
-        ]);
-        
-        return result;
-      } catch (error) {
-        lastError = error as Error;
-        attempt++;
-        this.retryCount[infoHashStr]++;
-        
-        // 如果是最后一次尝试，抛出错误
-        if (attempt >= maxAttempts) {
-          break;
-        }
-        
-        // 计算退避延迟
-        const delay = this.config.retryDelay! * Math.pow(this.config.retryBackoffFactor!, attempt - 1);
-        
-        // 发送重试事件
-        this.emit('retry', {
-          infoHash: infoHashStr,
-          peer: { host: peer.host, port: peer.port },
-          attempt,
-          maxAttempts,
-          delay,
-          error: lastError.message
-        });
-        
-        // 等待延迟时间
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-    
-    throw lastError!;
-  }
+
   
   /**
    * 启动性能监控
    */
   private startPerformanceMonitoring(): void {
-    if (this.performanceMonitoringInterval) {
-      return;
-    }
-    
-    this.performanceMonitoringInterval = setInterval(() => {
-      const stats = this.getStats();
-      
-      this.emit('performanceStats', {
-        uptime: stats.uptime,
-        totalFetchCount: stats.totalFetchCount,
-        successRate: stats.successRate,
-        queueSize: stats.metadataWaitingQueueSize,
-        activeFetching: stats.activeFetchingCount,
-        memoryUsage: process.memoryUsage()
-      });
-    }, this.config.performanceMonitoringInterval);
+    // 使用通用性能监控功能
+    this.addPerformanceMetric('metadata_manager_start', Date.now());
   }
   
   /**
    * 停止性能监控
    */
   private stopPerformanceMonitoring(): void {
-    if (this.performanceMonitoringInterval) {
-      clearInterval(this.performanceMonitoringInterval);
-      this.performanceMonitoringInterval = undefined;
-    }
+    // 使用通用性能监控功能
+    this.addPerformanceMetric('metadata_manager_stop', Date.now());
   }
   
   /**
@@ -546,13 +465,6 @@ export class MetadataManager extends BaseManager {
   private cleanupExpiredTasks(): void {
     const now = Date.now();
     const maxAge = 3600000; // 1小时
-    
-    // 清理过期的重试计数
-    Object.keys(this.retryCount).forEach(key => {
-      if (now - this.startTime > maxAge) {
-        delete this.retryCount[key];
-      }
-    });
     
     // 清理等待队列中的过期项
     const originalLength = this.metadataWaitingQueues.length;
@@ -572,10 +484,13 @@ export class MetadataManager extends BaseManager {
   /**
    * 执行内存清理
    */
-  private performMemoryCleanup(): void {
+  protected performMemoryCleanup(): void {
     try {
-      // 清理过期的重试计数和等待队列
+      // 清理过期的等待队列
       this.cleanupExpiredTasks();
+      
+      // 调用父类的内存清理功能
+      super.performMemoryCleanup();
       
       // 触发垃圾回收（如果可用）
       if (global.gc) {

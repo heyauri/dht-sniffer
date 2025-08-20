@@ -1,4 +1,4 @@
-import * as utils from "../utils";
+import { getRandomId } from "../utils/dht-utils";
 import * as net from 'net';
 import ut_metadata from './ut_metadata';
 import Protocol from '../bittorrent-protocol';
@@ -30,7 +30,7 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
             wire.use(ut_metadata(wire))
             // all `ut_metadata` functionality can now be accessed at wire.ut_metadata
             // handshake
-            wire.handshake(infoHash, utils.getRandomId());
+            wire.handshake(infoHash, getRandomId());
             // 'metadata' event will fire when the metadata arrives and is verified to be correct!
             (wire as any).ut_metadata.on('metadata', (metadata: Buffer) => {
                 resolve(metadata);

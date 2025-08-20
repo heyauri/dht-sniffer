@@ -1,6 +1,13 @@
 import { EventEmitter } from 'events';
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { ErrorType } from '../types/error';
+import { RetryManager, RetryConfig } from './common/retry-manager';
+import { PerformanceMonitor, PerformanceMonitorConfig } from './common/performance-monitor';
+import { MemoryManager, MemoryManagerConfig } from './common/memory-manager';
+import { ConfigValidator, ValidationRule } from './common/config-validator';
+import { withConfigValidation, ConfigValidationMixin } from './common/config-mixin';
+import { withEventListeners, EventListenerMixin, EventListenerFactory } from './common/event-listener-mixin';
+import { withErrorHandling, ErrorHandlingMixin, ErrorHandlingConfig } from './common/error-handling-mixin';
 
 /**
  * 管理器基础配置接口
@@ -10,6 +17,12 @@ export interface BaseManagerConfig {
   enableMemoryMonitoring?: boolean;
   cleanupInterval?: number;
   memoryThreshold?: number;
+  // 通用功能模块配置
+  retryConfig?: RetryConfig;
+  performanceConfig?: PerformanceMonitorConfig;
+  memoryConfig?: MemoryManagerConfig;
+  enableRetry?: boolean;
+  enablePerformanceMonitoring?: boolean;
 }
 
 /**
@@ -30,25 +43,29 @@ export interface ManagerStats {
 /**
  * 基础管理器类 - 提供所有管理器的公共功能
  */
-export abstract class BaseManager extends EventEmitter {
+export abstract class BaseManager extends withConfigValidation(
+  withEventListeners(
+    withErrorHandling(EventEmitter)
+  )
+) implements ConfigValidationMixin, EventListenerMixin, ErrorHandlingMixin {
   protected errorHandler: ErrorHandlerImpl;
   protected config: BaseManagerConfig;
   protected cleanupInterval: NodeJS.Timeout | null;
   protected startTime: number;
   protected cleanupCount: number;
   protected isDestroyed: boolean;
+  // 通用功能模块
+  protected retryManager?: RetryManager;
+  protected performanceMonitor?: PerformanceMonitor;
+  protected memoryManager?: MemoryManager;
+  protected configValidator?: ConfigValidator;
 
   constructor(config: BaseManagerConfig, errorHandler?: ErrorHandlerImpl) {
     super();
     
-    // 设置默认配置
-    this.config = {
-      enableErrorHandling: true,
-      enableMemoryMonitoring: true,
-      cleanupInterval: 5 * 60 * 1000, // 5分钟
-      memoryThreshold: 100 * 1024 * 1024, // 100MB
-      ...config
-    };
+    // 使用混入的配置验证和合并功能
+    this.config = this.mergeWithDefaults(config);
+    this.validateConfig(this.config);
     
     // 初始化错误处理器
     this.errorHandler = errorHandler || new ErrorHandlerImpl();
@@ -57,6 +74,12 @@ export abstract class BaseManager extends EventEmitter {
     this.startTime = Date.now();
     this.cleanupCount = 0;
     this.isDestroyed = false;
+    
+    // 初始化通用功能模块
+    this.initializeCommonModules();
+    
+    // 设置通用事件监听器
+    this.setupCommonEventListeners();
     
     // 启动定期清理任务
     this.startPeriodicCleanup();
@@ -68,9 +91,70 @@ export abstract class BaseManager extends EventEmitter {
   protected abstract getManagerName(): string;
 
   /**
+   * 初始化通用功能模块
+   */
+  private initializeCommonModules(): void {
+    try {
+      // 初始化重试管理器
+      if (this.config.enableRetry) {
+        this.retryManager = new RetryManager(this.config.retryConfig || {});
+        this.retryManager.on('retry', (event) => {
+          this.emit('retry', {
+            manager: this.getManagerName(),
+            ...event
+          });
+        });
+      }
+      
+      // 初始化性能监控器
+      if (this.config.enablePerformanceMonitoring) {
+        this.performanceMonitor = new PerformanceMonitor(this.config.performanceConfig || {});
+        this.performanceMonitor.on('performanceWarning', (event) => {
+          this.emit('performanceWarning', {
+            manager: this.getManagerName(),
+            ...event
+          });
+        });
+      }
+      
+      // 初始化内存管理器
+      if (this.config.enableMemoryMonitoring) {
+        this.memoryManager = new MemoryManager(this.config.memoryConfig || {});
+        this.memoryManager.on('memoryCleanup', (event) => {
+          this.emit('memoryCleanup', {
+            manager: this.getManagerName(),
+            ...event
+          });
+        });
+      }
+      
+      // 初始化配置验证器
+      this.configValidator = new ConfigValidator();
+    } catch (error) {
+      this.handleError('initializeCommonModules', error);
+    }
+  }
+
+  /**
+   * 设置通用事件监听器
+   */
+  private setupCommonEventListeners(): void {
+    const managerName = this.getManagerName();
+    
+    // 使用事件监听器工厂创建通用监听器
+    this.setupBatchEventListeners([
+      EventListenerFactory.createErrorListener(this.errorHandler, managerName),
+      EventListenerFactory.createWarningListener(this.errorHandler, managerName),
+      EventListenerFactory.createPerformanceWarningListener(this.errorHandler, managerName),
+      EventListenerFactory.createMemoryCleanupListener(this.errorHandler, managerName),
+      EventListenerFactory.createRetryListener(this.errorHandler, managerName)
+    ]);
+  }
+
+  /**
    * 验证配置（子类可以重写）
    */
-  protected validateConfig(config: BaseManagerConfig): void {
+  public validateConfig(config: BaseManagerConfig): void {
     if (!config) {
       throw new Error(`${this.getManagerName()} config is required`);
     }
@@ -113,27 +197,33 @@ export abstract class BaseManager extends EventEmitter {
   }
 
   /**
-   * 统一错误处理
+   * 统一错误处理 - 使用混入的错误处理功能
    */
-  protected handleError(operation: string, error: any, context?: any, errorType: ErrorType = ErrorType.SYSTEM): void {
-    if (!this.config.enableErrorHandling) {
-      return;
-    }
-    
-    const processedError = error instanceof Error ? error : new Error(String(error));
-    
-    this.errorHandler.handleError(processedError, {
+  public handleError(operation: string, error: any, context?: any, errorType: ErrorType = ErrorType.SYSTEM): void {
+    // 使用混入的错误处理方法
+    super.handleError(operation, error, {
       manager: this.getManagerName(),
-      operation,
-      ...context,
-      errorType
+      ...context
+    }, errorType);
+  }
+
+  /**
+   * 处理警告
+   */
+  public handleWarning(operation: string, message: string, context?: any): void {
+    super.handleWarning(operation, message, {
+      manager: this.getManagerName(),
+      ...context
     });
-    
-    this.emit('error', {
+  }
+
+  /**
+   * 处理严重错误
+   */
+  public handleCriticalError(operation: string, error: any, context?: any): void {
+    super.handleCriticalError(operation, error, {
       manager: this.getManagerName(),
-      operation,
-      error: processedError,
-      context
+      ...context
     });
   }
 
@@ -256,6 +346,53 @@ export abstract class BaseManager extends EventEmitter {
   }
 
   /**
+   * 使用重试机制执行操作
+   */
+  protected async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string,
+    context?: any
+  ): Promise<T> {
+    if (!this.retryManager || !this.config.enableRetry) {
+      return operation();
+    }
+    
+    return this.retryManager.executeWithRetry(
+      operation,
+      operationName,
+      context
+    );
+  }
+  
+  /**
+   * 添加性能指标
+   */
+  protected addPerformanceMetric(name: string, value: number): void {
+    if (this.performanceMonitor && this.config.enablePerformanceMonitoring) {
+      this.performanceMonitor.setCustomMetric(name, value);
+    }
+  }
+  
+  /**
+   * 执行内存清理
+   */
+  protected performMemoryCleanup(): void {
+    if (this.memoryManager && this.config.enableMemoryMonitoring) {
+      this.memoryManager.performMemoryCleanup();
+    }
+  }
+  
+  /**
+   * 验证配置
+   */
+  protected validateConfiguration(config: any, rules: ValidationRule[]): void {
+    if (this.configValidator) {
+      this.configValidator.addRules(this.getManagerName(), rules);
+      this.configValidator.validate(this.getManagerName(), config);
+    }
+  }
+
+  /**
    * 销毁管理器
    */
   destroy(): void {
@@ -269,6 +406,9 @@ export abstract class BaseManager extends EventEmitter {
       // 停止定期清理任务
       this.stopPeriodicCleanup();
       
+      // 销毁通用功能模块
+      this.destroyCommonModules();
+      
       // 清理所有数据
       this.clear();
       
@@ -281,6 +421,35 @@ export abstract class BaseManager extends EventEmitter {
       });
     } catch (error) {
       this.handleError('destroy', error);
+    }
+  }
+  
+  /**
+   * 销毁通用功能模块
+   */
+  private destroyCommonModules(): void {
+    try {
+      // 停止性能监控
+      if (this.performanceMonitor) {
+        this.performanceMonitor.destroy();
+      }
+      
+      // 清理重试管理器
+      if (this.retryManager) {
+        this.retryManager.removeAllListeners();
+      }
+      
+      // 清理内存管理器
+      if (this.memoryManager) {
+        this.memoryManager.removeAllListeners();
+      }
+      
+      // 清理配置验证器
+      if (this.configValidator) {
+        // ConfigValidator不需要特殊的清理逻辑
+      }
+    } catch (error) {
+      this.handleError('destroyCommonModules', error);
     }
   }
 }

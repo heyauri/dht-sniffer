@@ -115,6 +115,8 @@ export interface DHTManagerConfig {
   cleanupInterval?: number;
   maxRetries?: number;
   retryDelay?: number;
+  defaultInfoHash?: string;
+  defaultPort?: number;
 }
 
 /**
