@@ -111,3 +111,4 @@ dist
 .prettierrc
 tmp
 package-lock.json
+remote.txt

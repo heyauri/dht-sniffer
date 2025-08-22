@@ -49,7 +49,6 @@ export class DHTManager extends BaseManager {
     
     // 设置默认配置
     this.config = Object.assign({
-      address: '0.0.0.0',
       port: 6881,
       bootstrapNodes: bootstrapNodes,
       enableMemoryMonitoring: true,

@@ -2,7 +2,7 @@
 // "bittorrent-protocol": "^4.1.20"
 //@ts-nocheck
 import bencode from '../bencode'
-import * as BitField from 'bitfield'
+import BitField from 'bitfield'
 import * as crypto from 'crypto'
 import * as Debug from 'debug'
 import * as RC4 from 'rc4'

@@ -8,10 +8,10 @@ async function findAvailablePort(startPort = 6881, maxAttempts = 100) {
     const net = require('net');
     const { exec } = require('child_process');
     const execAsync = require('util').promisify(exec);
-    
+
     for (let i = 0; i < maxAttempts; i++) {
         const port = startPort + i;
-        
+
         try {
             // 首先检查端口是否被占用
             if (process.platform === 'darwin' || process.platform === 'linux') {
@@ -25,23 +25,23 @@ async function findAvailablePort(startPort = 6881, maxAttempts = 100) {
                     // 端口没有被占用，继续检查
                 }
             }
-            
+
             // 然后尝试绑定端口
             const isAvailable = await new Promise((resolve) => {
                 const server = net.createServer();
-                
+
                 server.listen(port, '0.0.0.0', () => {
                     const { port: listenedPort } = server.address();
                     server.close(() => {
                         resolve(listenedPort === port);
                     });
                 });
-                
+
                 server.on('error', () => {
                     resolve(false);
                 });
             });
-            
+
             if (isAvailable) {
                 console.log(`Port ${port} is available`);
                 return port;
@@ -51,7 +51,7 @@ async function findAvailablePort(startPort = 6881, maxAttempts = 100) {
             continue;
         }
     }
-    
+
     throw new Error(`No available port found starting from ${startPort} after ${maxAttempts} attempts`);
 }
 
@@ -59,12 +59,12 @@ async function findAvailablePort(startPort = 6881, maxAttempts = 100) {
 async function getDHTAvailablePort(preferredPort = 6881) {
     try {
         console.log(`Checking preferred port: ${preferredPort}`);
-        
+
         // 首先尝试首选端口
         const net = require('net');
         const { exec } = require('child_process');
         const execAsync = require('util').promisify(exec);
-        
+
         // 检查端口占用情况
         if (process.platform === 'darwin' || process.platform === 'linux') {
             try {
@@ -74,10 +74,10 @@ async function getDHTAvailablePort(preferredPort = 6881) {
                 console.log(`Port ${preferredPort} appears to be free`);
             }
         }
-        
+
         const isAvailable = await new Promise((resolve) => {
             const server = net.createServer();
-            
+
             server.listen(preferredPort, '0.0.0.0', () => {
                 const { port: listenedPort } = server.address();
                 server.close(() => {
@@ -85,30 +85,30 @@ async function getDHTAvailablePort(preferredPort = 6881) {
                     resolve(listenedPort === preferredPort);
                 });
             });
-            
+
             server.on('error', (error) => {
                 console.log(`Failed to bind port ${preferredPort}: ${error.message}`);
                 resolve(false);
             });
         });
-        
+
         if (isAvailable) {
             console.log(`Preferred port ${preferredPort} is available`);
             return preferredPort;
         }
-        
+
         console.log(`Preferred port ${preferredPort} is not available, trying alternatives...`);
-        
+
         // 如果首选端口不可用，查找其他可用端口
         // DHT常用端口范围：6881-6889
         const dhtPorts = [6882, 6883, 6884, 6885, 6886, 6887, 6888, 6889];
-        
+
         for (const port of dhtPorts) {
             console.log(`Trying port ${port}...`);
-            
+
             const portAvailable = await new Promise((resolve) => {
                 const server = net.createServer();
-                
+
                 server.listen(port, '0.0.0.0', () => {
                     const { port: listenedPort } = server.address();
                     server.close(() => {
@@ -116,19 +116,19 @@ async function getDHTAvailablePort(preferredPort = 6881) {
                         resolve(listenedPort === port);
                     });
                 });
-                
+
                 server.on('error', (error) => {
                     console.log(`Failed to bind port ${port}: ${error.message}`);
                     resolve(false);
                 });
             });
-            
+
             if (portAvailable) {
                 console.log(`Found available port: ${port}`);
                 return port;
             }
         }
-        
+
         // 如果DHT端口都不可用，从6890开始查找
         console.log('DHT ports not available, searching from 6890...');
         return await findAvailablePort(6890);
@@ -144,27 +144,31 @@ async function startDHTSniffer() {
         // 获取可用端口
         const port = await getDHTAvailablePort(6881);
         console.log(`Using available port: ${port}`);
-        
+
         let sniffer = new DHTSniffer(
             {
-                port: port, 
+                port: port,
                 nodesMaxSize: 10000,
                 refreshPeriod: 30000,
                 announcePeriod: 30000,
-                maximumParallelFetchingTorrent: 40, 
-                maximumWaitingQueueSize: -1, 
-                downloadMaxTime: 20000, 
-                ignoreFetched: true, 
+                maximumParallelFetchingTorrent: 40,
+                maximumWaitingQueueSize: -1,
+                downloadMaxTime: 20000,
+                ignoreFetched: true,
                 aggressiveLevel: 0
             });
-        
+
         sniffer.start();
         sniffer.on("start", infos => {
             console.log(infos);
         })
         sniffer.on('infoHash', (infoHash, peer) => {
+            let tors_path = path.join(__dirname, "../tors/")
             // console.log('get infoHash:', infoHash, peer);
-            if (!fs.existsSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`))) {
+            if (!fs.existsSync(tors_path)) {
+                fs.mkdirSync(tors_path);
+            }
+            if (!fs.existsSync(path.join(tors_path, `${infoHash.toString("hex")}.torrent`))) {
                 sniffer.fetchMetaData(infoHash, peer, true);
                 console.log(JSON.stringify(sniffer.getStats()));
             }
@@ -179,9 +183,9 @@ async function startDHTSniffer() {
             console.error('ERROR:', err);
             console.error('ERROR STACK:', err.stack);
         });
-        
+
         let timestamp = Date.now();
-        
+
         sniffer.on("metadata", (infoHash, metadata) => {
             console.log("success", infoHash, metadata);
             try {
@@ -195,13 +199,13 @@ async function startDHTSniffer() {
         sniffer.on("metadataError", data => {
             // console.error("fail", data["infoHash"], data["error"]);
         })
-        
+
         let usefulPeerDict = fs.existsSync("../useful-peers.json") ? require("../useful-peers.json") : {};
-        
+
         for (let peer of Object.values(usefulPeerDict)) {
             sniffer.importPeer(peer);
         }
-        
+
         setInterval(() => {
             console.log(JSON.stringify(sniffer.getStats()));
             let usefulPeers = sniffer.exportPeers();
@@ -226,22 +230,55 @@ async function startDHTSniffer() {
             }
             fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(usefulPeerDict));
         }, 60 * 1000)
-        
+
         setInterval(() => {
             // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timestamp + '.heapsnapshot'));
-            console.log(JSON.stringify(sniffer.getStats()));
+            // console.log(JSON.stringify(sniffer.getStats()));
         }, 60 * 1000)
-        
+
         let tmp_fp = path.join(__dirname, "../tmp/arr")
-        process.on("SIGINT", () => {
-            let arr = sniffer.exportWaitingQueue();
-            let json = JSON.stringify(arr);
-            if (arr.length > 0) {
-                fs.writeFileSync(tmp_fp, json);
+        
+        // 优雅退出处理函数
+        function gracefulShutdown(signal) {
+            console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+            
+            try {
+                let arr = sniffer.exportWaitingQueue();
+                let json = JSON.stringify(arr);
+                if (arr.length > 0) {
+                    fs.writeFileSync(tmp_fp, json);
+                    console.log(`Saved ${arr.length} items from waiting queue to ${tmp_fp}`);
+                }
+                
+                // 停止DHT嗅探器
+                if (sniffer && typeof sniffer.stop === 'function') {
+                    sniffer.stop();
+                    console.log('DHT sniffer stopped');
+                }
+                
+                console.log('Graceful shutdown completed');
+            } catch (error) {
+                console.error('Error during graceful shutdown:', error);
+            } finally {
+                process.exit(0);
             }
-            process.exit();
+        }
+        
+        // 监听SIGINT (Ctrl+C)和SIGTERM信号
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        
+        // 监听未捕获的异常
+        process.on('uncaughtException', (error) => {
+            console.error('Uncaught Exception:', error);
+            gracefulShutdown('uncaughtException');
         });
         
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+            gracefulShutdown('unhandledRejection');
+        });
+
         try {
             if (fs.existsSync(tmp_fp)) {
                 let s = fs.readFileSync(tmp_fp).toString();
@@ -253,7 +290,7 @@ async function startDHTSniffer() {
         } catch (e) {
             console.error(e);
         }
-        
+
         return sniffer;
     } catch (error) {
         console.error('Failed to start DHT sniffer:', error);
