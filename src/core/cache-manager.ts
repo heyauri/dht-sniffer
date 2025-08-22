@@ -293,7 +293,11 @@ export class CacheManager extends BaseManager {
   getAllPeers(): any[] {
     const peers: any[] = [];
     for (const [_key, value] of this.usefulPeers) {
-      peers.push(value.peer);
+      // 返回包含完整信息的peer对象
+      peers.push({
+        ...value.peer,
+        infoHash: value.infoHash
+      });
     }
     return peers;
   }

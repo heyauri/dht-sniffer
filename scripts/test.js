@@ -162,15 +162,15 @@ async function startDHTSniffer() {
         sniffer.on("start", infos => {
             console.log(infos);
         })
-        sniffer.on('infoHash', (infoHash, peer) => {
+        sniffer.on('infoHash', (peerInfo) => {
             let tors_path = path.join(__dirname, "../tors/")
-            // console.log('get infoHash:', infoHash, peer);
+            console.log('get infoHash:', peerInfo.infoHash, peerInfo.peer);
             if (!fs.existsSync(tors_path)) {
                 fs.mkdirSync(tors_path);
             }
-            if (!fs.existsSync(path.join(tors_path, `${infoHash.toString("hex")}.torrent`))) {
-                sniffer.fetchMetaData(infoHash, peer, true);
-                console.log(JSON.stringify(sniffer.getStats()));
+            if (!fs.existsSync(path.join(tors_path, `${peerInfo.infoHash.toString("hex")}.torrent`))) {
+                sniffer.fetchMetaData(peerInfo, true);
+                // console.log(JSON.stringify(sniffer.getStats()));
             }
         });
         sniffer.on('node', node => {
@@ -186,14 +186,18 @@ async function startDHTSniffer() {
 
         let timestamp = Date.now();
 
-        sniffer.on("metadata", (infoHash, metadata) => {
-            console.log("success", infoHash, metadata);
+        sniffer.on("metadata", (metadataInfo) => {
+            console.log("success", metadataInfo.infoHash, metadataInfo.metadata);
             try {
-                fs.writeFileSync(path.join(__dirname, "../tors/", `${infoHash.toString("hex")}.torrent`), metadata);
-                // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
+                if (metadataInfo.metadata && Buffer.isBuffer(metadataInfo.metadata)) {
+                    fs.writeFileSync(path.join(__dirname, "../tors/", `${metadataInfo.infoHash.toString("hex")}.torrent`), metadataInfo.metadata);
+                    // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
+                } else {
+                    console.warn(`Invalid metadata for infoHash ${metadataInfo.infoHash.toString("hex")}: metadata is ${metadataInfo.metadata === null ? 'null' : 'undefined'}`);
+                }
             } catch (e) {
                 console.error(e);
-                // fs.writeFileSync(path.join(__dirname, `${infoHash.toString("hex")}.torrent`), metadata);
+                // fs.writeFileSync(path.join(__dirname, `${metadataInfo.infoHash.toString("hex")}.torrent`), metadataInfo.metadata);
             }
         })
         sniffer.on("metadataError", data => {
@@ -209,22 +213,26 @@ async function startDHTSniffer() {
         setInterval(() => {
             console.log(JSON.stringify(sniffer.getStats()));
             let usefulPeers = sniffer.exportPeers();
+            let currentTime = Date.now(); // 使用当前时间而不是固定的timestamp
             for (let peer of usefulPeers) {
                 let peerKey = `${peer.host}:${peer.port}`;
                 if (!Reflect.has(usefulPeerDict, peerKey)) {
                     usefulPeerDict[peerKey] = {
-                        host: peer.host, port: peer.port, value: 1, lastSeen: timestamp
+                        host: peer.host, port: peer.port, value: 1, lastSeen: currentTime
                     }
-                }
-                if (usefulPeerDict[peerKey].lastSeen !== timestamp) {
-                    usefulPeerDict[peerKey]["value"] += 1;
-                    usefulPeerDict[peerKey].lastSeen = timestamp;
+                } else {
+                    // 只有当peer在当前周期中被再次发现时才增加value
+                    if (usefulPeerDict[peerKey].lastSeen < currentTime - 50 * 1000) { // 50秒间隔避免重复计数
+                        usefulPeerDict[peerKey]["value"] += 1;
+                    }
+                    usefulPeerDict[peerKey].lastSeen = currentTime;
                 }
             }
-            let now = new Date().getTime();
+            let now = Date.now();
             for (let key in usefulPeerDict) {
                 let peer = usefulPeerDict[key];
-                if (peer.value == 1 && now - peer.lastSeen > 60 * 86400 * 1000) {
+                // 清理60天未活跃且value为1的peer
+                if (peer.value == 1 && now - peer.lastSeen > 60 * 24 * 60 * 60 * 1000) {
                     Reflect.deleteProperty(usefulPeerDict, key);
                 }
             }

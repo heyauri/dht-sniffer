@@ -12,9 +12,11 @@ const MAX_METADATA_SIZE = 1E7 // 10 MB
 const BITFIELD_GROW = 1E3
 const PIECE_LENGTH = 1 << 14 // 16 KiB
 
-export default metadata => {
-  class utMetadata extends EventEmitter {
-    constructor (wire) {
+export default class utMetadata extends EventEmitter {
+    static get name() {
+      return 'ut_metadata'
+    }
+    constructor (wire, metadata) {
       super()
 
       this._wire = wire
@@ -240,8 +242,5 @@ export default metadata => {
     }
   }
 
-  // Name of the bittorrent-protocol extension
-  utMetadata.prototype.name = 'ut_metadata'
-
-  return utMetadata
-}
+// Name of the bittorrent-protocol extension
+utMetadata.prototype.name = 'ut_metadata'

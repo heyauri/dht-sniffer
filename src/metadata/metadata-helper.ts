@@ -27,7 +27,7 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
             const wire = new Protocol() as any;
             socket.pipe(wire as any).pipe(socket)
             // initialize the extension
-            wire.use(ut_metadata(wire))
+            wire.use(ut_metadata)
             // all `ut_metadata` functionality can now be accessed at wire.ut_metadata
             // handshake
             wire.handshake(infoHash, getRandomId());
@@ -99,9 +99,9 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
                     },
                     true
                 ));
-            } else {
-                resolve(Buffer.from('success'));
             }
+            // 如果socket正常关闭但没有收到metadata，不调用resolve
+            // 这会让Promise保持pending状态，最终会被timeout处理
         });
     });
 }

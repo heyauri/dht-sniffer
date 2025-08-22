@@ -83,7 +83,17 @@ export class PeerManager extends BaseManager {
    */
   exportUsefulPeers(): Peer[] {
     const usefulPeers = this.cacheManager.getUsefulPeers();
-    return [...usefulPeers.values()];
+    const peers: Peer[] = [];
+    
+    for (const [_key, value] of usefulPeers) {
+      // 返回包含完整信息的peer对象
+      peers.push({
+        ...value.peer,
+        infoHash: value.infoHash
+      });
+    }
+    
+    return peers;
   }
   
   /**
