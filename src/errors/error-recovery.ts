@@ -2,13 +2,12 @@
  * 错误恢复策略实现
  */
 import { EventEmitter } from 'events';
-import { 
-  AppError, 
-  ErrorType, 
+import {
+  AppError,
+  ErrorType,
   RecoveryStrategy, 
   RecoveryOptions, 
-  RecoveryResult,
-  isAppError
+  RecoveryResult
 } from './error-types';
 
 /**
@@ -306,7 +305,7 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
   delayMs: number = 1000,
-  context: Record<string, any> = {}
+  _context: Record<string, any> = {}
 ): Promise<T> {
   let lastError: Error;
   

@@ -95,7 +95,7 @@ export interface WaitingQueueItem {
  */
 export interface MetadataWaitingItem {
   infoHash: Buffer;
-  peer: any;
+  peer: Peer;
   infoHashStr: string;
 }
 

@@ -1,12 +1,10 @@
 import { EventEmitter } from 'events';
 import { ErrorHandlerImpl } from '../errors/error-handler-impl';
-import { ErrorMonitor, ErrorMonitorConfig } from '../errors/error-monitor';
-import { BaseManager, BaseManagerConfig } from './base-manager';
-import { DHTManager, DHTManagerConfig } from './dht-manager';
+import { ErrorMonitor } from '../errors/error-monitor';
+import { DHTManager } from './dht-manager';
 import { PeerManager } from './peer-manager';
-import { PeerManagerConfig } from '../types/dht';
-import { CacheManager, CacheConfig } from './cache-manager';
-import { MetadataManager, MetadataManagerConfig } from './metadata-manager';
+import { CacheManager } from './cache-manager';
+import { MetadataManager } from './metadata-manager';
 
 /**
  * 依赖注入容器 - 解决管理器间的循环依赖问题

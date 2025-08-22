@@ -66,7 +66,6 @@ import {
 
 import {
   Metadata,
-  MetadataError as MetadataErrorType,
   MetadataWarning,
   WaitingQueueItem
 } from './metadata';

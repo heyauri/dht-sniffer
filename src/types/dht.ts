@@ -2,9 +2,6 @@
  * DHT相关类型定义
  */
 
-import { EventEmitter } from 'events';
-import { LRUCache } from 'lru-cache';
-
 /**
  * Peer接口
  */
@@ -142,7 +139,7 @@ export interface PeerManagerConfig {
  */
 export interface DHTInstance {
   nodeId: Buffer;
-  nodes: any;
+  nodes: Node[];
   listening: boolean;
   destroyed: boolean;
   addNode(node: { host: string; port: number }): void;

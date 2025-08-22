@@ -203,7 +203,7 @@ export function withErrorHandling<T extends new (...args: any[]) => any>(Base: T
     /**
      * 标准化错误
      */
-    private normalizeError(error: any, errorType: ErrorType): Error {
+    private normalizeError(error: any, _errorType: ErrorType): Error {
       if (error instanceof Error) {
         return error;
       }
@@ -306,7 +306,7 @@ export function withErrorHandling<T extends new (...args: any[]) => any>(Base: T
     /**
      * 尝试错误恢复
      */
-    private attemptErrorRecovery(error: Error, operation: string, context: any): void {
+    private attemptErrorRecovery(error: Error, operation: string, _context: any): void {
       // 这里可以实现通用的错误恢复逻辑
       // 例如：重试、回滚、降级等
       
@@ -331,10 +331,10 @@ export class ErrorHandlingDecorator {
   static create(
     errorHandler: ErrorHandlerImpl,
     operation: string,
-    errorType: ErrorType = ErrorType.SYSTEM,
+    _errorType: ErrorType = ErrorType.SYSTEM,
     context?: any
   ) {
-    return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+    return function (_target: any, propertyKey: string, descriptor: PropertyDescriptor) {
       const originalMethod = descriptor.value;
       
       descriptor.value = function (...args: any[]) {

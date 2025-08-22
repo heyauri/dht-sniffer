@@ -43,7 +43,7 @@ export interface ErrorContext {
   stack?: string;
   cause?: Error;
   // 扩展属性以支持各种上下文信息
-  arguments?: any[];
+  arguments?: unknown[];
   batchIndex?: number;
   executionType?: string;
   retryAttempts?: number;

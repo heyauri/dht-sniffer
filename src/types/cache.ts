@@ -86,7 +86,7 @@ export interface CacheOptions {
   noDeleteOnStaleGet?: boolean;
   maxSize?: number;
   sizeCalculation?: (value: any, key: string) => number;
-  fetchMethod?: (key: string, staleValue: any, context: { options: any, signal: AbortSignal }) => Promise<any> | any;
+  fetchMethod?: (key: string, staleValue: any, context: { options: CacheOptions, signal: AbortSignal }) => Promise<any> | any;
   fetchContext?: any;
   dispose?: (value: any, key: string) => void;
   disposeAfter?: (value: any, key: string) => void;
@@ -95,7 +95,7 @@ export interface CacheOptions {
 /**
  * 增强的LRUCache接口
  */
-export interface EnhancedLRUCache<K = any, V = any> extends LRUCache<K, V> {
+export interface EnhancedLRUCache<K extends string = string, V extends {} = any> extends LRUCache<K, V> {
   getStats(): CacheStats;
   enableStats(enable: boolean): void;
   clearStats(): void;

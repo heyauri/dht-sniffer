@@ -1,16 +1,9 @@
-import { EventEmitter } from 'events';
 import * as metadataHelper from '../metadata/metadata-helper';
-import * as utils from '../utils';
 import { NetworkError, TimeoutError, MetadataError } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
-import { Logger } from '../types/config';
-import { Config } from '../types/config';
-import { Metadata } from '../types/metadata';
 import { MetadataWaitingItem, MetadataManagerConfig, MetadataStats } from '../types/metadata';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
-import { dhtConfigValidationRules } from './common/config-mixin';
 import { ErrorType } from '../types/error';
-import * as process from 'process';
 
 /**
  * 元数据管理器配置接口
@@ -27,7 +20,7 @@ export class MetadataManager extends BaseManager {
   private metadataWaitingQueues: MetadataWaitingItem[];
   private metadataFetchingDict: Record<string, number>;
   private aggressiveLimit: number;
-  private performanceMonitoringInterval?: NodeJS.Timeout;
+
   protected startTime: number;
   private totalFetchCount: number;
   private successFetchCount: number;
@@ -468,7 +461,7 @@ export class MetadataManager extends BaseManager {
     
     // 清理等待队列中的过期项
     const originalLength = this.metadataWaitingQueues.length;
-    this.metadataWaitingQueues = this.metadataWaitingQueues.filter(item => {
+    this.metadataWaitingQueues = this.metadataWaitingQueues.filter(_item => {
       return now - this.startTime < maxAge;
     });
     

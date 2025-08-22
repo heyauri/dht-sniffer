@@ -36,7 +36,6 @@ export class ConfigManagerImpl extends EventEmitter implements ConfigManagerType
   }
 
   public set<T extends keyof Config>(key: T, value: Config[T]): void {
-    const oldValue = this.config[key];
     this.config[key] = value;
     this.emit('change', key, value);
   }

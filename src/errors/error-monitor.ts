@@ -1,8 +1,6 @@
 import { EventEmitter } from 'events';
-import { AppError, ErrorHandler, ErrorType, ErrorSeverity, ErrorStats, ErrorReport } from '../types/error';
-import { ErrorRecord, RecoveryOptions, RecoveryResult } from './error-types';
-import { LoggerConfig } from '../types/config';
-import { LRUCache } from 'lru-cache';
+import { AppError, ErrorHandler, ErrorType, ErrorSeverity, ErrorStats } from '../types/error';
+import { ErrorRecord } from './error-types';
 
 // 扩展ErrorStats接口以包含监控所需的额外属性
 interface ExtendedErrorStats extends ErrorStats {
@@ -68,7 +66,6 @@ export class ErrorMonitor extends EventEmitter {
   private errorsByType: Record<ErrorType, number> = this.initErrorCount();
   private errorsBySeverity: Record<ErrorSeverity, number> = this.initSeverityCount();
   private recentErrors: ExtendedAppError[] = [];
-  private peakErrorTime: number | null = null;
   private peakErrorCount = 0;
 
   constructor(
@@ -174,10 +171,9 @@ export class ErrorMonitor extends EventEmitter {
     }
     this.lastErrorTime = now;
     
-    // 更新峰值错误时间
+    // 更新峰值错误计数
     if (this.errorTimestamps.length > this.peakErrorCount) {
       this.peakErrorCount = this.errorTimestamps.length;
-      this.peakErrorTime = now;
     }
     
     // 检查连续错误阈值
@@ -361,7 +357,6 @@ export class ErrorMonitor extends EventEmitter {
     this.consecutiveErrorCount = 0;
     this.lastErrorTime = 0;
     this.recoveryStartTime = 0;
-    this.peakErrorTime = null;
     this.peakErrorCount = 0;
     
     this.emit('statsReset');

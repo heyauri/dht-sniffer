@@ -1,16 +1,9 @@
-import { EventEmitter } from 'events';
-import * as dgram from 'dgram';
-import { LRUCache } from 'lru-cache';
-import { ErrorHandler } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
-import { ValidationError, NetworkError, ErrorType } from '../types/error';
+import { ValidationError, ErrorType } from '../types/error';
 import { Peer, PeerManagerConfig } from '../types/dht';
-import { Logger } from '../types/config';
-import { Config } from '../types/config';
 import { getPeerKey } from '../utils/dht-utils';
 import { shuffle } from '../utils/array-utils';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
-import { peerConfigValidationRules } from './common/config-mixin';
 
 /**
  * 节点管理器配置接口
@@ -372,7 +365,7 @@ export class PeerManager extends BaseManager {
     const maxAge = this.config.maxNodeAge || 24 * 60 * 60 * 1000;
     
     // 移除过期节点
-    this.nodes = this.nodes.filter((node, index) => {
+    this.nodes = this.nodes.filter((node, _index) => {
       const nodeKey = getPeerKey(node);
       const creationTime = this.nodeCreationTimes.get(nodeKey);
       

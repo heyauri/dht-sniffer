@@ -1,14 +1,11 @@
-import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 import * as DHT from '../dht/dht';
-import { getPeerKey, getNeighborId, isNodeId, parseNodes } from '../utils/dht-utils';
-import { shuffle } from '../utils/array-utils';
-import { NetworkError, ValidationError } from '../types/error';
+import { getNeighborId, isNodeId, parseNodes } from '../utils/dht-utils';
+import { NetworkError } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { PeerManager } from './peer-manager';
-import { DHTOptions, Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
-import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
-import { dhtConfigValidationRules } from './common/config-mixin';
+import { Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
+import { BaseManager, ManagerStats } from './base-manager';
 
 
 
@@ -274,8 +271,6 @@ export class DHTManager extends BaseManager {
     if (!this.dht || !this.isDHTRunning()) return;
 
     try {
-      const nodeKey = getPeerKey(peer);
-
       // 获取或生成目标ID
       const target = nodeId !== undefined
         ? getNeighborId(nodeId, this.dht.nodeId)
@@ -412,7 +407,7 @@ export class DHTManager extends BaseManager {
     try {
       this.dht._bootstrap(populate);
       if (this.config.enhanceBootstrap) {
-        this.config.bootstrapNodes.forEach(node => {
+        this.config.bootstrapNodes?.forEach(node => {
           this.findNode(node);
         });
       }
@@ -485,7 +480,7 @@ export class DHTManager extends BaseManager {
   /**
    * 获取DHT统计信息
    */
-  getDHTStats() {
+  getDHTStats(): any {
     const peerStats = this.peerManager.getStats();
 
     return {

@@ -8,8 +8,8 @@ import { EventEmitter } from 'events';
  * 基础协议事件接口
  */
 export interface BaseProtocolEvents {
-  handshake: (infoHash: Buffer, peerId: Buffer, extensions: any) => void;
-  extended: (extension: string, data: any) => void;
+  handshake: (infoHash: Buffer, peerId: Buffer, extensions: Record<string, unknown>) => void;
+  extended: (extension: string, data: Record<string, unknown>) => void;
   choke: () => void;
   unchoke: () => void;
   interested: () => void;

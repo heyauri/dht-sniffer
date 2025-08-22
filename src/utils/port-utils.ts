@@ -87,7 +87,7 @@ export async function killProcessOnPort(port: number): Promise<boolean> {
   try {
     // 查找占用端口的进程
     const { stdout } = await execAsync(`lsof -ti:${port}`);
-    const pids = stdout.trim().split('\n').filter(pid => pid);
+    const pids = stdout.trim().split('\n').filter((pid: string) => pid);
     
     if (pids.length === 0) {
       return false;

@@ -4,7 +4,7 @@ import ut_metadata from './ut_metadata';
 import Protocol from '../bittorrent-protocol';
 import * as bencode from '../bencode';
 import * as crypto from 'crypto';
-import { NetworkError, TimeoutError, MetadataError, ErrorType, ErrorSeverity } from '../errors/error-types';
+import { NetworkError, TimeoutError, MetadataError } from '../errors/error-types';
 import { Peer, ParsedMetadata } from '../types';
 
 export interface MetadataFetchTarget {
@@ -54,7 +54,7 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
             })
 
             // handle handshake
-            wire.on('handshake', (infoHash: Buffer, peerId: Buffer) => {
+            wire.on('handshake', (_infoHash: Buffer, _peerId: Buffer) => {
                 // ask the peer to send us metadata
                 (wire as any).ut_metadata.fetch()
             })

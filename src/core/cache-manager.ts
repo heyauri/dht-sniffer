@@ -3,9 +3,7 @@ import { ErrorHandlerImpl } from '../errors/error-handler';
 import { CacheError } from '../types/error';
 import { CacheConfig, CacheStats } from '../types/cache';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
-import { ValidationRule } from './common/config-validator';
 import { CacheAccessHelper, CacheAccessHelperFactory, CacheAccessConfig } from './common/cache-access-helper';
-import { cacheConfigValidationRules } from './common/config-mixin';
 
 /**
  * 扩展的内存使用情况接口，包含缓存内存信息
@@ -38,10 +36,6 @@ export class CacheManager extends BaseManager {
   // 缓存访问助手
   private fetchedTupleHelper: CacheAccessHelper;
   private fetchedInfoHashHelper: CacheAccessHelper;
-  private findNodeCacheHelper: CacheAccessHelper;
-  private latestCalledPeersHelper: CacheAccessHelper;
-  private usefulPeersHelper: CacheAccessHelper;
-  private metadataFetchingHelper: CacheAccessHelper;
   
   constructor(config: CacheManagerExtendedConfig, errorHandler?: ErrorHandlerImpl) {
     super(config, errorHandler);
@@ -116,29 +110,7 @@ export class CacheManager extends BaseManager {
     };
     this.fetchedInfoHashHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, fetchedInfoHashConfig);
     
-    const findNodeCacheConfig: CacheAccessConfig = {
-      ...cacheAccessConfig,
-      cacheName: 'findNodeCache'
-    };
-    this.findNodeCacheHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, findNodeCacheConfig);
-    
-    const latestCalledPeersConfig: CacheAccessConfig = {
-      ...cacheAccessConfig,
-      cacheName: 'latestCalledPeers'
-    };
-    this.latestCalledPeersHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, latestCalledPeersConfig);
-    
-    const usefulPeersConfig: CacheAccessConfig = {
-      ...cacheAccessConfig,
-      cacheName: 'usefulPeers'
-    };
-    this.usefulPeersHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, usefulPeersConfig);
-    
-    const metadataFetchingConfig: CacheAccessConfig = {
-      ...cacheAccessConfig,
-      cacheName: 'metadataFetchingCache'
-    };
-    this.metadataFetchingHelper = CacheAccessHelperFactory.getHelper(this.errorHandler, metadataFetchingConfig);
+
     
     this.counter = {
       fetchedTupleHit: 0,
@@ -320,7 +292,7 @@ export class CacheManager extends BaseManager {
    */
   getAllPeers(): any[] {
     const peers: any[] = [];
-    for (const [key, value] of this.usefulPeers) {
+    for (const [_key, value] of this.usefulPeers) {
       peers.push(value.peer);
     }
     return peers;
@@ -345,41 +317,7 @@ export class CacheManager extends BaseManager {
     this.counter.hitRate = 0;
   }
   
-  /**
-   * 记录缓存访问
-   * @param cacheName 缓存名称
-   * @param key 缓存键
-   * @param hit 是否命中
-   */
-  private recordCacheAccess(cacheName: string, key: string, hit: boolean): void {
-    this.counter.totalRequests++;
-    
-    // 更新访问历史
-    const accessKey = `${cacheName}:${key}`;
-    const current = this.cacheAccessHistory.get(accessKey) || { count: 0, lastAccess: 0 };
-    this.cacheAccessHistory.set(accessKey, {
-      count: current.count + 1,
-      lastAccess: Date.now()
-    });
-    
-    // 更新统计
-    if (cacheName === 'fetchedTuple') {
-      if (hit) {
-        this.counter.fetchedTupleHit++;
-      } else {
-        this.counter.fetchedTupleMiss++;
-      }
-    } else if (cacheName === 'fetchedInfoHash') {
-      if (hit) {
-        this.counter.fetchedInfoHashHit++;
-      } else {
-        this.counter.fetchedInfoHashMiss++;
-      }
-    }
-    
-    // 计算命中率
-    this.updateHitRate();
-  }
+
   
   /**
    * 更新缓存命中率
@@ -432,6 +370,7 @@ export class CacheManager extends BaseManager {
       entries.forEach(([key, value]) => {
         this.fetchedTuple.set(key, value);
       });
+      this.updateHitRate();
     }
     
     // 增加fetchedInfoHash缓存大小
@@ -446,6 +385,7 @@ export class CacheManager extends BaseManager {
       entries.forEach(([key, value]) => {
         this.fetchedInfoHash.set(key, value);
       });
+      this.updateHitRate();
     }
   }
   
@@ -469,6 +409,7 @@ export class CacheManager extends BaseManager {
       entriesToKeep.forEach(([key, value]) => {
         this.fetchedTuple.set(key, value);
       });
+      this.updateHitRate();
     }
     
     // 减少fetchedInfoHash缓存大小
@@ -485,6 +426,7 @@ export class CacheManager extends BaseManager {
       entriesToKeep.forEach(([key, value]) => {
         this.fetchedInfoHash.set(key, value);
       });
+      this.updateHitRate();
     }
   }
   
@@ -517,6 +459,7 @@ export class CacheManager extends BaseManager {
       
       if (cache && !cache.has(key)) {
         cache.set(key, value);
+        this.updateHitRate();
       }
     });
     
@@ -801,7 +744,7 @@ export class CacheManager extends BaseManager {
     let estimatedOriginalSize = 0;
     let compressedSize = 0;
     
-    for (const [key, compressed] of this.compressedCache) {
+    for (const [_key, compressed] of this.compressedCache) {
       try {
         const decompressed = this.decompressData(compressed);
         if (decompressed) {

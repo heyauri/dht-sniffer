@@ -7,7 +7,7 @@ import { MemoryManager, MemoryManagerConfig } from './common/memory-manager';
 import { ConfigValidator, ValidationRule } from './common/config-validator';
 import { withConfigValidation, ConfigValidationMixin } from './common/config-mixin';
 import { withEventListeners, EventListenerMixin, EventListenerFactory } from './common/event-listener-mixin';
-import { withErrorHandling, ErrorHandlingMixin, ErrorHandlingConfig } from './common/error-handling-mixin';
+import { withErrorHandling, ErrorHandlingMixin } from './common/error-handling-mixin';
 
 /**
  * 管理器基础配置接口

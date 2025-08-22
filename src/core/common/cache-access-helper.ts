@@ -36,7 +36,6 @@ export interface CacheAccessStats {
 export class CacheAccessHelper {
   private stats: Map<string, CacheAccessStats> = new Map();
   private accessHistory: Map<string, Array<{ key: string; hit: boolean; timestamp: number }>> = new Map();
-  private compressedData: Map<string, Buffer> = new Map();
 
   constructor(
     private errorHandler: ErrorHandlerImpl,
@@ -62,7 +61,7 @@ export class CacheAccessHelper {
   /**
    * 安全获取缓存值
    */
-  async getWithRetry<T>(
+  async getWithRetry<T extends {}>(
     cache: LRUCache<string, T>,
     key: string,
     operation: string = 'cache_access'
@@ -81,7 +80,7 @@ export class CacheAccessHelper {
   /**
    * 安全设置缓存值
    */
-  async setWithRetry<T>(
+  async setWithRetry<T extends {}>(
     cache: LRUCache<string, T>,
     key: string,
     value: T,
@@ -105,7 +104,7 @@ export class CacheAccessHelper {
   /**
    * 批量获取缓存值
    */
-  async batchGet<T>(
+  async batchGet<T extends {}>(
     cache: LRUCache<string, T>,
     keys: string[],
     operation: string = 'batch_cache_get'
@@ -134,7 +133,7 @@ export class CacheAccessHelper {
   /**
    * 批量设置缓存值
    */
-  async batchSet<T>(
+  async batchSet<T extends {}>(
     cache: LRUCache<string, T>,
     entries: Array<{ key: string; value: T; ttl?: number }>,
     operation: string = 'batch_cache_set'
@@ -158,7 +157,7 @@ export class CacheAccessHelper {
   /**
    * 带压缩的缓存设置
    */
-  async setWithCompression<T>(
+  async setWithCompression<T extends {}>(
     cache: LRUCache<string, T>,
     key: string,
     value: T,
@@ -260,7 +259,7 @@ export class CacheAccessHelper {
   private async executeWithRetry<T>(
     fn: () => Promise<T>,
     operation: string,
-    context: any
+    context: Record<string, any>
   ): Promise<T> {
     if (!this.config.enableRetry) {
       return fn();

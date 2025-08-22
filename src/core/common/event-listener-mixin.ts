@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { ErrorHandlerImpl } from '../../errors/error-handler';
 import { ErrorType } from '../../types/error';
 
@@ -168,14 +167,14 @@ export class EventListenerFactory {
    * 创建错误事件监听器配置
    */
   static createErrorListener(
-    errorHandler: ErrorHandlerImpl,
+    _errorHandler: ErrorHandlerImpl,
     managerName: string,
     errorContext?: any
   ): EventListenerConfig {
     return {
       event: 'error',
       handler: (error: Error) => {
-        errorHandler.handleError(error, {
+        _errorHandler.handleError(error, {
           manager: managerName,
           operation: 'event_listener',
           ...errorContext
@@ -188,13 +187,13 @@ export class EventListenerFactory {
    * 创建警告事件监听器配置
    */
   static createWarningListener(
-    errorHandler: ErrorHandlerImpl,
+    _errorHandler: ErrorHandlerImpl,
     managerName: string
   ): EventListenerConfig {
     return {
       event: 'warning',
       handler: (warning: string) => {
-        errorHandler.handleError(new Error(warning), {
+        _errorHandler.handleError(new Error(warning), {
           manager: managerName,
           operation: 'event_listener',
           severity: 'warning'
@@ -207,7 +206,7 @@ export class EventListenerFactory {
    * 创建性能警告监听器配置
    */
   static createPerformanceWarningListener(
-    errorHandler: ErrorHandlerImpl,
+    _errorHandler: ErrorHandlerImpl,
     managerName: string
   ): EventListenerConfig {
     return {
@@ -222,7 +221,7 @@ export class EventListenerFactory {
    * 创建内存清理监听器配置
    */
   static createMemoryCleanupListener(
-    errorHandler: ErrorHandlerImpl,
+    _errorHandler: ErrorHandlerImpl,
     managerName: string
   ): EventListenerConfig {
     return {
@@ -237,7 +236,7 @@ export class EventListenerFactory {
    * 创建重试监听器配置
      */
   static createRetryListener(
-    errorHandler: ErrorHandlerImpl,
+    _errorHandler: ErrorHandlerImpl,
     managerName: string
   ): EventListenerConfig {
     return {

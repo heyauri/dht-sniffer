@@ -1,17 +1,13 @@
 import { EventEmitter } from 'events';
-import { emitter } from 'last-one-wins';
-import * as utils from './utils';
 import { ErrorHandler, ErrorHandlerImpl } from './errors/error-handler';
 import { ErrorMonitor, ErrorMonitorConfig } from './errors/error-monitor';
 import { CacheManager, CacheConfig } from './core/cache-manager';
 import { PeerManager } from './core/peer-manager';
-import { MetadataManager, MetadataManagerConfig } from './core/metadata-manager';
-import { DHTManager, DHTManagerConfig } from './core/dht-manager';
+import { MetadataManager } from './core/metadata-manager';
+import { DHTManager } from './core/dht-manager';
 import { createDefaultContainer, DIContainer } from './core/container';
 import { ConfigValidatorManager } from './config/validator';
 import { createDefaultEventBus, EventBus, EventTypes } from './core/event-bus';
-import * as os from 'os';
-import * as process from 'process';
 
 /**
  * DHT嗅探器配置
@@ -136,18 +132,7 @@ export class DHTSniffer extends EventEmitter {
     this.container = createDefaultContainer(this.config);
   }
 
-  /**
-   * 初始化业务组件
-   */
-  private initializeBusinessComponents(): void {
-    // 从容器获取组件实例
-    this.errorHandler = this.container.get<ErrorHandlerImpl>('errorHandler');
-    this.errorMonitor = this.container.get<ErrorMonitor>('errorMonitor');
-    this.cacheManager = this.container.get<CacheManager>('cacheManager');
-    this.peerManager = this.container.get<PeerManager>('peerManager');
-    this.metadataManager = this.container.get<MetadataManager>('metadataManager');
-    this.dhtManager = this.container.get<DHTManager>('dhtManager');
-  }
+
 
   /**
    * 使用分组配置初始化业务组件
