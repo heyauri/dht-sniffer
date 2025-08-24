@@ -99,10 +99,21 @@ export abstract class BaseManager extends withConfigValidation(
       if (this.config.enableRetry) {
         this.retryManager = new RetryManager(this.config.retryConfig || {});
         this.retryManager.on('retry', (event) => {
-          this.emit('retry', {
+          // 从context中提取infoHash信息
+          const infoHash = event.context?.infoHash || null;
+          const peer = event.context?.peer || null;
+          
+          // 构建增强的重试事件
+          const enhancedEvent = {
             manager: this.getManagerName(),
-            ...event
-          });
+            ...event,
+            // 添加infoHash信息（如果存在）
+            ...(infoHash && { infoHash }),
+            // 添加peer信息（如果存在）
+            ...(peer && { peer })
+          };
+          
+          this.emit('retry', enhancedEvent);
         });
       }
       

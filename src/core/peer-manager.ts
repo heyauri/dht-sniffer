@@ -8,7 +8,7 @@ import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
 /**
  * 节点管理器配置接口
  */
-export interface PeerManagerExtendedConfig extends PeerManagerConfig, BaseManagerConfig {}
+export interface PeerManagerExtendedConfig extends PeerManagerConfig, BaseManagerConfig { }
 
 
 /**
@@ -22,19 +22,19 @@ export class PeerManager extends BaseManager {
   private rpc: any;
   private cacheManager: any;
   private nodeCreationTimes: Map<string, number>;
-  
+
   constructor(config: PeerManagerExtendedConfig, dht: any, cacheManager: any, errorHandler?: ErrorHandlerImpl) {
     super(config, errorHandler);
-    
+
     this.dht = dht;
     this.rpc = dht?._rpc;
     this.cacheManager = cacheManager;
-    
+
     this.nodes = [];
     this.nodesDict = {};
     this.nodeCreationTimes = new Map();
   }
-  
+
   /**
    * 导入peer
    */
@@ -43,18 +43,22 @@ export class PeerManager extends BaseManager {
       this.handleError('importPeer', new ValidationError('Invalid peer data', { peer }), { peer, errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     const peerKey = getPeerKey(peer);
-    
     if (!this.nodesDict[peerKey]) {
       try {
         this.dht.addNode({ host: peer.host, port: peer.port });
+        this.addNode(peer);
+        
+        // 添加这行来同时更新peerCount
+        this.cacheManager.addPeerToCache(peerKey, peer);
       } catch (error) {
+        console.error(error);
         this.handleError('importPeer', error, { peer, errorType: ErrorType.NETWORK });
       }
     }
   }
-  
+
   /**
    * 导入有用的peers
    */
@@ -63,11 +67,11 @@ export class PeerManager extends BaseManager {
       this.handleError('importUsefulPeers', new ValidationError('Cache manager not available', { operation: 'importUsefulPeers' }), { errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     try {
       const usefulPeers = this.cacheManager.getUsefulPeers();
       const peers = shuffle([...usefulPeers.values()]);
-      
+
       for (const peer of peers) {
         if (Math.random() > Math.min(0.99, (this.rpc.pending.length / 50 + this.nodes.length / 500))) {
           this.importPeer(peer);
@@ -77,25 +81,25 @@ export class PeerManager extends BaseManager {
       this.handleError('importUsefulPeers', error, { errorType: ErrorType.SYSTEM });
     }
   }
-  
+
   /**
    * 导出有用的peers
    */
-  exportUsefulPeers(): Peer[] {
+exportUsefulPeers(): Peer[] {
     const usefulPeers = this.cacheManager.getUsefulPeers();
     const peers: Peer[] = [];
-    
     for (const [_key, value] of usefulPeers) {
-      // 返回包含完整信息的peer对象
-      peers.push({
-        ...value.peer,
-        infoHash: value.infoHash
-      });
+      // 增加对peer的address和port的检查
+      if (value.peer && value.peer.host && value.peer.port) {
+        // 返回包含完整信息的peer对象
+        peers.push({
+          ...value.peer,
+        });
+      }
     }
-    
     return peers;
   }
-  
+
   /**
    * 更新节点列表
    */
@@ -104,7 +108,7 @@ export class PeerManager extends BaseManager {
       this.handleError('updateNodes', new ValidationError('DHT RPC not available', { operation: 'updateNodes' }), { errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     try {
       const nodes = this.dht._rpc.nodes.toArray();
       this.nodes = nodes;
@@ -112,34 +116,34 @@ export class PeerManager extends BaseManager {
         prev[getPeerKey(curr)] = 1;
         return prev;
       }, {});
-      
+
       shuffle(this.nodes);
     } catch (error) {
       this.handleError('updateNodes', error, { errorType: ErrorType.NETWORK });
     }
   }
-  
+
   /**
    * 获取节点数量
    */
   getNodeCount(): number {
     return this.nodes.length;
   }
-  
+
   /**
    * 获取节点字典
    */
   getNodesDict(): Record<string, number> {
     return { ...this.nodesDict };
   }
-  
+
   /**
    * 获取所有节点
    */
   getNodes(): Peer[] {
     return [...this.nodes];
   }
-  
+
   /**
    * 检查是否需要扩展节点
    */
@@ -147,7 +151,7 @@ export class PeerManager extends BaseManager {
     const timeDiff = Date.now() - lastReceiveTime.getTime();
     return this.nodes.length < 5 || timeDiff > this.config.nodeRefreshTime;
   }
-  
+
   /**
    * 检查是否需要调用findNode
    */
@@ -155,13 +159,13 @@ export class PeerManager extends BaseManager {
     const nodeKey = `${node.host}:${node.port}`;
     const findNodeCache = this.cacheManager.getFindNodeCache();
     const latestCalledPeers = this.cacheManager.getLatestCalledPeers();
-    
-    return !findNodeCache.get(nodeKey) && 
-           !latestCalledPeers.get(nodeKey) && 
-           Math.random() > this.config.findNodeProbability + this.rpc.pending.length / 10 && 
-           this.nodes.length < this.config.maxNodes;
+
+    return !findNodeCache.get(nodeKey) &&
+      !latestCalledPeers.get(nodeKey) &&
+      Math.random() > this.config.findNodeProbability + this.rpc.pending.length / 10 &&
+      this.nodes.length < this.config.maxNodes;
   }
-  
+
   /**
    * 标记节点为已调用
    */
@@ -169,18 +173,18 @@ export class PeerManager extends BaseManager {
     const nodeKey = `${node.host}:${node.port}`;
     const findNodeCache = this.cacheManager.getFindNodeCache();
     const latestCalledPeers = this.cacheManager.getLatestCalledPeers();
-    
+
     findNodeCache.set(nodeKey, 1);
     latestCalledPeers.set(nodeKey, 1);
   }
-  
+
   /**
    * 检查节点数量是否过少
    */
   isNodeCountCritical(): boolean {
     return this.nodes.length <= 3;
   }
-  
+
   /**
    * 设置DHT实例
    */
@@ -196,12 +200,12 @@ export class PeerManager extends BaseManager {
     try {
       const now = Date.now();
       const maxAge = this.config.maxNodeAge || 24 * 60 * 60 * 1000; // 24小时
-      
+
       // 清理过期的节点
       this.nodes = this.nodes.filter(node => {
         const nodeKey = getPeerKey(node);
         const creationTime = this.nodeCreationTimes.get(nodeKey);
-        
+
         if (creationTime && (now - creationTime) > maxAge) {
           // 从节点字典中删除
           delete this.nodesDict[nodeKey];
@@ -211,7 +215,7 @@ export class PeerManager extends BaseManager {
         }
         return true;
       });
-      
+
       // 清理节点创建时间映射中的无效条目
       for (const [nodeKey, creationTime] of this.nodeCreationTimes.entries()) {
         if ((now - creationTime) > maxAge) {
@@ -220,7 +224,7 @@ export class PeerManager extends BaseManager {
           delete this.nodesDict[nodeKey];
         }
       }
-      
+
       this.emit('cleanupCompleted', {
         remainingNodes: this.nodes.length,
         cleanedNodes: this.nodes.length - this.nodes.length
@@ -229,7 +233,7 @@ export class PeerManager extends BaseManager {
       this.handleError('cleanup', error, { errorType: ErrorType.SYSTEM });
     }
   }
-  
+
   /**
    * 添加节点
    */
@@ -238,23 +242,22 @@ export class PeerManager extends BaseManager {
       this.handleError('addNode', new ValidationError('Invalid node data', { node }), { node, errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     try {
       const nodeKey = getPeerKey(node);
-      
       if (!this.nodesDict[nodeKey]) {
         // 检查是否超过最大节点数限制
         if (this.nodes.length >= this.config.maxNodes) {
           this.cleanupOldNodes();
         }
-        
+
         // 如果仍然超过限制，不添加新节点
         if (this.nodes.length >= this.config.maxNodes) {
           return;
         }
-        
+
         this.nodes.push(node);
-        this.nodesDict[nodeKey] = this.nodes.length - 1;
+        this.nodesDict[nodeKey] = 1; // 修改为简单标记，不使用数组索引
         this.nodeCreationTimes.set(nodeKey, Date.now());
         this.emit('node', node);
       }
@@ -262,7 +265,7 @@ export class PeerManager extends BaseManager {
       this.handleError('addNode', error, { node, errorType: ErrorType.SYSTEM });
     }
   }
-  
+
   /**
    * 添加peer
    */
@@ -271,11 +274,17 @@ export class PeerManager extends BaseManager {
       this.handleError('addPeer', new ValidationError('Invalid peer info', { peerInfo }), { peerInfo, errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
+    // 增加对peer的address和port的检查
+    if (!peerInfo.peer.host || !peerInfo.peer.port) {
+      this.handleError('addPeer', new ValidationError('Peer address or port is undefined', { peer: peerInfo.peer }), { peer: peerInfo.peer, errorType: ErrorType.VALIDATION });
+      return;
+    }
+
     try {
       const { peer, infoHash } = peerInfo;
       const peerKey = getPeerKey(peer);
-      
+
       // 添加到缓存
       this.cacheManager.addPeerToCache(peerKey, { peer, infoHash });
       this.emit('peer', { infoHash, peer });
@@ -287,14 +296,16 @@ export class PeerManager extends BaseManager {
       );
     }
   }
-  
+
   /**
    * 导出节点
    */
   exportNodes(): Peer[] {
-    return [...this.nodes];
+    // 增加对node的address和port的检查
+    return this.nodes.filter(node => node && node.host && node.port);
   }
-  
+
+
   /**
    * 导入节点
    */
@@ -303,9 +314,14 @@ export class PeerManager extends BaseManager {
       this.handleError('importNodes', new ValidationError('Nodes must be an array', { nodes }), { nodes, errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     try {
       for (const node of nodes) {
+        // 增加对node的address和port的检查
+        if (!node || !node.host || !node.port) {
+          this.handleError('importNodes', new ValidationError('Node address or port is undefined', { node }), { node, errorType: ErrorType.VALIDATION });
+          continue;
+        }
         this.addNode(node);
       }
     } catch (error) {
@@ -316,14 +332,16 @@ export class PeerManager extends BaseManager {
       );
     }
   }
-  
+
   /**
    * 导出peers
    */
   exportPeers(): Peer[] {
-    return this.cacheManager.getAllPeers();
+    const allPeers = this.cacheManager.getAllPeers();
+    // 增加对peer的address和port的检查
+    return allPeers.filter(peer => peer && peer.host && peer.port);
   }
-  
+
   /**
    * 导入peers
    */
@@ -332,10 +350,10 @@ export class PeerManager extends BaseManager {
       this.handleError('importPeers', new ValidationError('Peers must be an array', { peers }), { peers, errorType: ErrorType.VALIDATION });
       return;
     }
-    
+
     try {
       for (const peer of peers) {
-        this.cacheManager.addPeerToCache(getPeerKey(peer), peer);
+        this.importPeer(peer);
       }
     } catch (error) {
       this.handleError(
@@ -345,7 +363,7 @@ export class PeerManager extends BaseManager {
       );
     }
   }
-  
+
   /**
    * 获取节点统计信息
    */
@@ -356,7 +374,7 @@ export class PeerManager extends BaseManager {
       cacheStats: this.cacheManager.getStats()
     };
   }
-  
+
   /**
    * 清理节点数据
    */
@@ -366,19 +384,19 @@ export class PeerManager extends BaseManager {
     this.nodeCreationTimes.clear();
     this.emit('peerDataCleared');
   }
-  
+
   /**
    * 清理过期节点
    */
   public cleanupOldNodes(): void {
     const now = Date.now();
     const maxAge = this.config.maxNodeAge || 24 * 60 * 60 * 1000;
-    
+
     // 移除过期节点
     this.nodes = this.nodes.filter((node, _index) => {
       const nodeKey = getPeerKey(node);
       const creationTime = this.nodeCreationTimes.get(nodeKey);
-      
+
       if (creationTime && (now - creationTime) > maxAge) {
         delete this.nodesDict[nodeKey];
         this.nodeCreationTimes.delete(nodeKey);
@@ -386,7 +404,7 @@ export class PeerManager extends BaseManager {
       }
       return true;
     });
-    
+
     // 重建节点字典
     this.nodesDict = {};
     this.nodes.forEach((node, index) => {
@@ -408,7 +426,7 @@ export class PeerManager extends BaseManager {
     try {
       // 清理过期节点
       this.cleanupOldNodes();
-      
+
       // 检查内存使用情况
       if (this.config.enableMemoryMonitoring) {
         // 内存使用检查由基类处理
@@ -443,7 +461,7 @@ export class PeerManager extends BaseManager {
       `Peer operation failed: ${operation}`,
       { operation, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
     );
-    
+
     super.handleError(operation, peerError, context);
   }
 
@@ -454,7 +472,7 @@ export class PeerManager extends BaseManager {
     try {
       // 清理所有节点和peer
       this.clearPeerData();
-      
+
       // 调用父类的深度清理
       super.performDeepCleanup();
     } catch (error) {

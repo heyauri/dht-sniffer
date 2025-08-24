@@ -84,7 +84,7 @@ export class DHTSniffer extends EventEmitter {
       enableAutoRestart: false,
       restartDelay: 5000
     }, config);
-    
+
     this.isRunning = false;
     this.startTime = Date.now();
     this.restartCount = 0;
@@ -93,7 +93,7 @@ export class DHTSniffer extends EventEmitter {
 
     // 将扁平配置转换为分组配置结构
     const groupedConfig = this.transformConfigForValidation(this.config);
-    
+
     // 初始化架构组件
     this.initializeArchitectureComponents();
 
@@ -110,10 +110,10 @@ export class DHTSniffer extends EventEmitter {
   private initializeArchitectureComponents(): void {
     // 初始化配置验证器
     this.configValidator = new ConfigValidatorManager();
-    
+
     // 将扁平配置转换为分组配置结构进行验证
     const groupedConfig = this.transformConfigForValidation(this.config);
-    
+
     // 验证配置
     const validationResult = this.configValidator.validateAll(groupedConfig);
     const hasErrors = Object.values(validationResult).some(result => !result.isValid);
@@ -132,8 +132,6 @@ export class DHTSniffer extends EventEmitter {
     this.container = createDefaultContainer(this.config);
   }
 
-
-
   /**
    * 使用分组配置初始化业务组件
    * @param groupedConfig 分组配置对象
@@ -141,7 +139,7 @@ export class DHTSniffer extends EventEmitter {
   private initializeBusinessComponentsWithConfig(groupedConfig: any): void {
     // 使用分组配置创建容器
     this.container = createDefaultContainer(groupedConfig);
-    
+
     // 从容器获取组件实例
     this.errorHandler = this.container.get<ErrorHandlerImpl>('errorHandler');
     this.errorMonitor = this.container.get<ErrorMonitor>('errorMonitor');
@@ -149,6 +147,7 @@ export class DHTSniffer extends EventEmitter {
     this.peerManager = this.container.get<PeerManager>('peerManager');
     this.metadataManager = this.container.get<MetadataManager>('metadataManager');
     this.dhtManager = this.container.get<DHTManager>('dhtManager');
+    this.peerManager.setDHT(this.dhtManager);
   }
 
   /**
@@ -157,7 +156,7 @@ export class DHTSniffer extends EventEmitter {
   private setupEventListeners(): void {
     // 设置事件总线监听器
     this.setupEventBusListeners();
-    
+
     // 设置管理器事件转发
     this.setupManagerEventForwarding();
   }
@@ -264,29 +263,29 @@ export class DHTSniffer extends EventEmitter {
       // 在DHT管理器启动后，设置PeerManager的DHT实例
       const dhtInstance = this.dhtManager.getDHT();
       this.peerManager.setDHT(dhtInstance);
-      
+
       // 更新容器中的DHT实例引用
       this.container.register('dhtInstance', dhtInstance);
 
       this.isRunning = true;
       this.startTime = Date.now();
-      
+
       // 启动性能监控
       if (this.config.enablePerformanceMonitoring) {
         this.startPerformanceMonitoring();
       }
-      
+
       // 启动健康检查
       if (this.config.enableHealthCheck) {
         this.startHealthCheck();
       }
-      
+
       // 通过事件总线发布启动完成事件
       this.eventBus.publish(EventTypes.SYSTEM.started, {
         startTime: this.startTime,
         config: this.config
       });
-      
+
       this.emit('started');
     } catch (error) {
       this.isRunning = false;
@@ -309,16 +308,16 @@ export class DHTSniffer extends EventEmitter {
       // 停止监控和健康检查
       this.stopPerformanceMonitoring();
       this.stopHealthCheck();
-      
+
       // 停止DHT管理器
       await this.dhtManager.stop();
 
       // 清理元数据管理器
       this.metadataManager.clear();
-      
+
       // 清理缓存管理器
       await this.cacheManager.destroy();
-      
+
       // 清理节点管理器
       this.peerManager.clear();
 
@@ -342,10 +341,10 @@ export class DHTSniffer extends EventEmitter {
     try {
       // 清理事件总线
       this.eventBus.clearAllSubscriptions();
-      
+
       // 清理依赖注入容器
       this.container.clear();
-      
+
       // 清理配置验证器
       // ConfigValidatorManager没有clear方法，跳过清理
     } catch (error) {
@@ -409,6 +408,12 @@ export class DHTSniffer extends EventEmitter {
   importPeers(peers: any[]): void {
     this.dhtManager.importPeers(peers);
   }
+  /**
+   * 导入peer
+   */
+  importPeer(peer: any[]): void {
+    this.dhtManager.importPeer(peer);
+  }
 
   /**
    * 导出等待队列
@@ -433,7 +438,7 @@ export class DHTSniffer extends EventEmitter {
     const errorStats = this.errorMonitor.getStats();
     const cacheStats = this.cacheManager.getStats();
     const peerStats = this.peerManager.getStats();
-    
+
     const memoryUsage = process.memoryUsage();
     const uptime = Date.now() - this.startTime;
 
@@ -542,18 +547,18 @@ export class DHTSniffer extends EventEmitter {
     if (config.refreshPeriod !== undefined) groupedConfig.dht.refreshPeriod = config.refreshPeriod;
     if (config.announcePeriod !== undefined) groupedConfig.dht.announcePeriod = config.announcePeriod;
     if (config.bootstrapNodes !== undefined) groupedConfig.dht.bootstrap = config.bootstrapNodes;
-    
+
     // 元数据相关配置
     if (config.maximumParallelFetchingTorrent !== undefined) groupedConfig.metadata.maximumParallelFetchingTorrent = config.maximumParallelFetchingTorrent;
     if (config.maximumWaitingQueueSize !== undefined) groupedConfig.metadata.maximumWaitingQueueSize = config.maximumWaitingQueueSize;
     if (config.downloadMaxTime !== undefined) groupedConfig.metadata.downloadMaxTime = config.downloadMaxTime;
     if (config.ignoreFetched !== undefined) groupedConfig.metadata.ignoreFetched = config.ignoreFetched;
     if (config.aggressiveLevel !== undefined) groupedConfig.metadata.aggressiveLevel = config.aggressiveLevel;
-    
+
     // 缓存相关配置
     if (config.maxSize !== undefined) groupedConfig.cache.maxSize = config.maxSize;
     if (config.ttl !== undefined) groupedConfig.cache.ttl = config.ttl;
-    
+
     // 确保缓存配置包含必需的参数
     groupedConfig.cache.fetchedTupleSize = config.fetchedTupleSize || 1000;
     groupedConfig.cache.fetchedInfoHashSize = config.fetchedInfoHashSize || 5000;
@@ -561,14 +566,14 @@ export class DHTSniffer extends EventEmitter {
     groupedConfig.cache.latestCalledPeersSize = config.latestCalledPeersSize || 1000;
     groupedConfig.cache.usefulPeersSize = config.usefulPeersSize || 5000;
     groupedConfig.cache.metadataFetchingCacheSize = config.metadataFetchingCacheSize || 1000;
-    
+
     // 对等节点相关配置
     if (config.maxNodes !== undefined) groupedConfig.peer.maxNodes = config.maxNodes;
-    
+
     // 错误处理相关配置
     if (config.enableErrorHandling !== undefined) groupedConfig.error.enableErrorHandling = config.enableErrorHandling;
     if (config.maxErrorHistory !== undefined) groupedConfig.error.maxErrorHistory = config.maxErrorHistory;
-    
+
     // 系统相关配置
     if (config.enablePerformanceMonitoring !== undefined) {
       groupedConfig.dht.enablePerformanceMonitoring = config.enablePerformanceMonitoring;
@@ -622,11 +627,11 @@ export class DHTSniffer extends EventEmitter {
     if (this.performanceMonitoringInterval) {
       return;
     }
-    
+
     this.performanceMonitoringInterval = setInterval(() => {
       const stats = this.getStats();
       const memoryUsage = stats.system.memory;
-      
+
       // 检查内存使用
       if (memoryUsage.heapUsed > this.config.maxMemoryUsage!) {
         const memoryWarning = {
@@ -634,14 +639,14 @@ export class DHTSniffer extends EventEmitter {
           max: this.config.maxMemoryUsage,
           message: 'Memory usage exceeds threshold'
         };
-        
+
         // 通过事件总线发布内存警告
         this.eventBus.publish(EventTypes.SYSTEM.memoryWarning, memoryWarning);
-        
+
         // 触发内存清理
         this.performMemoryCleanup();
       }
-      
+
       // 发送性能统计
       const performanceStats = {
         memory: memoryUsage,
@@ -652,7 +657,7 @@ export class DHTSniffer extends EventEmitter {
           size: stats.cacheSize || 0
         }
       };
-      
+
       // 通过事件总线发布性能统计
       this.eventBus.publish(EventTypes.SYSTEM.performanceStats, performanceStats);
     }, this.config.performanceMonitoringInterval);
@@ -675,14 +680,14 @@ export class DHTSniffer extends EventEmitter {
     if (this.healthCheckInterval) {
       return;
     }
-    
+
     this.healthCheckInterval = setInterval(async () => {
       try {
         const health = await this.performHealthCheck();
-        
+
         // 通过事件总线发布健康检查结果
         this.eventBus.publish(EventTypes.SYSTEM.healthCheck, health);
-        
+
         // 如果健康检查失败且启用了自动重启
         if (!health.healthy && this.config.enableAutoRestart && !this.isShuttingDown) {
           await this.performRestart();
@@ -724,15 +729,15 @@ export class DHTSniffer extends EventEmitter {
       cacheManager: this.cacheManager.getStats().totalSize >= 0,
       memory: process.memoryUsage().heapUsed < this.config.maxMemoryUsage!
     };
-    
+
     const issues: string[] = [];
-    
+
     if (!checks.dhtManager) issues.push('DHT Manager is not running');
     if (!checks.peerManager) issues.push('Peer Manager has no nodes');
     if (!checks.metadataManager) issues.push('Metadata Manager has issues');
     if (!checks.cacheManager) issues.push('Cache Manager has issues');
     if (!checks.memory) issues.push('Memory usage too high');
-    
+
     return {
       healthy: Object.values(checks).every(check => check),
       checks,
@@ -747,23 +752,23 @@ export class DHTSniffer extends EventEmitter {
     try {
       // 清理缓存
       await this.cacheManager.cleanupMemory();
-      
+
       // 清理过期节点
       this.peerManager.cleanup();
-      
+
       // 清理DHT管理器内存
       this.dhtManager.performMemoryCleanup();
-      
+
       // 触发垃圾回收（如果可用）
       if (global.gc) {
         global.gc();
       }
-      
+
       // 通过事件总线发布内存清理完成事件
       this.eventBus.publish(EventTypes.SYSTEM.memoryCleanupCompleted, {
         timestamp: Date.now()
       });
-      
+
       this.emit('memoryCleanupCompleted');
     } catch (error) {
       this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.performMemoryCleanup' });
@@ -777,46 +782,46 @@ export class DHTSniffer extends EventEmitter {
     if (this.isShuttingDown) {
       return;
     }
-    
+
     const restartInfo = {
       restartCount: this.restartCount,
       timestamp: Date.now()
     };
-    
+
     // 通过事件总线发布重启开始事件
     this.eventBus.publish(EventTypes.SYSTEM.restarting, restartInfo);
-    
+
     this.emit('restarting');
-    
+
     try {
       await this.stop();
-      
+
       // 等待重启延迟
       await new Promise(resolve => setTimeout(resolve, this.config.restartDelay));
-      
+
       await this.start();
-      
+
       this.restartCount++;
       this.lastRestartTime = Date.now();
-      
+
       const completedRestartInfo = {
         restartCount: this.restartCount,
         restartTime: this.lastRestartTime
       };
-      
+
       // 通过事件总线发布重启完成事件
       this.eventBus.publish(EventTypes.SYSTEM.restarted, completedRestartInfo);
-      
+
       this.emit('restarted', completedRestartInfo);
     } catch (error) {
       this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.performRestart' });
-      
+
       // 通过事件总线发布重启失败事件
       this.eventBus.publish(EventTypes.SYSTEM.restartFailed, {
         error,
         timestamp: Date.now()
       });
-      
+
       this.emit('restartFailed', error);
     }
   }
@@ -828,46 +833,46 @@ export class DHTSniffer extends EventEmitter {
     if (this.isShuttingDown) {
       return;
     }
-    
+
     const shutdownInfo = {
       timestamp: Date.now(),
       timeout: this.config.gracefulShutdownTimeout
     };
-    
+
     // 通过事件总线发布关闭开始事件
     this.eventBus.publish(EventTypes.SYSTEM.shuttingDown, shutdownInfo);
-    
+
     this.emit('shuttingDown');
-    
+
     try {
       // 设置超时
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Graceful shutdown timeout')), this.config.gracefulShutdownTimeout);
       });
-      
+
       await Promise.race([
         this.stop(),
         timeoutPromise
       ]);
-      
+
       const completedShutdownInfo = {
         timestamp: Date.now(),
         duration: Date.now() - shutdownInfo.timestamp
       };
-      
+
       // 通过事件总线发布关闭完成事件
       this.eventBus.publish(EventTypes.SYSTEM.shutdownCompleted, completedShutdownInfo);
-      
+
       this.emit('shutdownCompleted');
     } catch (error) {
       this.errorHandler.handleError(error as Error, { operation: 'DHTSniffer.gracefulShutdown' });
-      
+
       // 通过事件总线发布关闭失败事件
       this.eventBus.publish(EventTypes.SYSTEM.shutdownFailed, {
         error,
         timestamp: Date.now()
       });
-      
+
       this.emit('shutdownFailed', error);
       throw error;
     }

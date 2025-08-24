@@ -112,3 +112,5 @@ dist
 tmp
 package-lock.json
 remote.txt
+
+useful-peers*

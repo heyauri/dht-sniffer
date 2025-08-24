@@ -8,12 +8,12 @@ import { NetworkError, TimeoutError, MetadataError } from '../errors/error-types
 import { Peer, ParsedMetadata } from '../types';
 
 export interface MetadataFetchTarget {
-  infoHash: Buffer;
-  peer: Peer;
+    infoHash: Buffer;
+    peer: Peer;
 }
 
 export interface MetadataFetchConfig {
-  downloadMaxTime?: number;
+    downloadMaxTime?: number;
 }
 
 export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig): Promise<Buffer> {
@@ -32,15 +32,16 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
             // handshake
             wire.handshake(infoHash, getRandomId());
             // 'metadata' event will fire when the metadata arrives and is verified to be correct!
-            (wire as any).ut_metadata.on('metadata', (metadata: Buffer) => {
+            wire.ut_metadata.on('metadata', (metadata: Buffer) => {
+                console.log("metadata", metadata);
                 resolve(metadata);
                 socket.end();
                 wire.destroy();
-            })
+            });
 
             // optionally, listen to the 'warning' event if you want to know that metadata is
             // probably not going to arrive for one of the above reasons.
-            (wire as any).ut_metadata.on('warning', (err: any) => {
+            wire.ut_metadata.on('warning', (err: any) => {
                 reject(new MetadataError(
                     `Metadata warning: ${err.message || err}`,
                     {
@@ -51,13 +52,13 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
                     true
                 ));
                 wire.destroy();
-            })
+            });
 
             // handle handshake
             wire.on('handshake', (_infoHash: Buffer, _peerId: Buffer) => {
                 // ask the peer to send us metadata
                 (wire as any).ut_metadata.fetch()
-            })
+            });
         });
 
         socket.on('error', function (err: Error) {

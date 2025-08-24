@@ -1,5 +1,5 @@
 import { text2arr } from '../uint8-util'
-import { digitcount, gettype } from './util'
+import { digitCount, getType } from './util'
 
 function listLength (list: any[]): number {
   let length = 1 + 1 // type marker + end-of-type marker
@@ -16,7 +16,7 @@ function mapLength (map: Map<any, any>): number {
 
   for (const [key, value] of map) {
     const keyLength = text2arr(key).byteLength
-    length += digitcount(keyLength) + 1 + keyLength
+    length += digitCount(keyLength) + 1 + keyLength
     length += encodingLength(value)
   }
 
@@ -29,7 +29,7 @@ function objectLength (value: Record<string, any>): number {
 
   for (let i = 0; i < keys.length; i++) {
     const keyLength = text2arr(keys[i]).byteLength
-    length += digitcount(keyLength) + 1 + keyLength
+    length += digitCount(keyLength) + 1 + keyLength
     length += encodingLength(value[keys[i]])
   }
 
@@ -38,12 +38,12 @@ function objectLength (value: Record<string, any>): number {
 
 function stringLength (value: string): number {
   const length = text2arr(value).byteLength
-  return digitcount(length) + 1 + length
+  return digitCount(length) + 1 + length
 }
 
 function arrayBufferLength (value: ArrayBuffer): number {
   const length = value.byteLength
-  return digitcount(length) + 1 + length
+  return digitCount(length) + 1 + length
 }
 
 function encodingLength (value: any): number {
@@ -51,13 +51,13 @@ function encodingLength (value: any): number {
 
   if (value == null) return length
 
-  const type = gettype(value)
+  const type = getType(value)
 
   switch (type) {
     case 'arraybufferview': return arrayBufferLength(value)
     case 'string': return stringLength(value)
     case 'array': case 'set': return listLength(value)
-    case 'number': return 1 + digitcount(Math.floor(value)) + 1
+    case 'number': return 1 + digitCount(Math.floor(value)) + 1
     case 'bigint': return 1 + value.toString().length + 1
     case 'object': return objectLength(value)
     case 'map': return mapLength(value)

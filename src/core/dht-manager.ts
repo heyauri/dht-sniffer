@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import * as DHT from '../dht/dht';
-import { getNeighborId, isNodeId, parseNodes } from '../utils/dht-utils';
+import { getNeighborId, isNodeId, parseNodes, shuffle } from '../utils';
 import { NetworkError } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { PeerManager } from './peer-manager';
@@ -42,11 +42,17 @@ export class DHTManager extends BaseManager {
   private announceInterval: NodeJS.Timeout | null;
   private memoryCleanupInterval: NodeJS.Timeout | null;
 
+  // 新增属性用于refresh机制
+  private lastRefreshTime: number = 0;
+  private latestCalledPeers: Map<string, number> = new Map();
+  private metadataWaitingQueues: any[] = [];
+  private metadataManager: any; // 需要注入MetadataManager实例
+
   constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager) {
     super(config, errorHandler);
-    
+
     this.peerManager = peerManager;
-    
+
     // 设置默认配置
     this.config = Object.assign({
       port: 6881,
@@ -84,7 +90,7 @@ export class DHTManager extends BaseManager {
         maxAge: this.config.maxAge,
         timeBucketOutdated: this.config.timeBucketOutdated
       };
-      
+
       this.dht = new DHT.DHT(dhtConfig);
 
       // 设置事件监听
@@ -142,22 +148,38 @@ export class DHTManager extends BaseManager {
   public setupEventListeners(): void {
     if (!this.dht) return;
 
-    // 监听节点事件
+    // 监听节点事件 - 参考用户提供的代码
     this.dht.on('node', (node: any) => {
-      this.peerManager.addNode(node);
-      this.emit('node', node);
+      // 增加对node的address和port的检查
+      if (node && node.host && node.port) {
+        this.latestReceive = new Date();
+        this.emit('node', node);
+
+        let nodeKey = `${node.host}:${node.port}`;
+        if (!this.latestCalledPeers?.get(nodeKey) &&
+          Math.random() > (this.dht._rpc?.pending?.length || 0) / 10 &&
+          this.peerManager.getNodeCount() < 400) {
+          this.findNode(node, node.id);
+        }
+      }
     });
 
     // 监听peer事件
     this.dht.on('peer', (peer: any, infoHash: Buffer) => {
-      this.peerManager.addPeer({ infoHash, peer });
-      this.emit('peer', { infoHash, peer });
+      // 增加对peer的address和port的检查
+      if (peer && peer.host && peer.port) {
+        this.peerManager.addPeer({ infoHash, peer });
+        this.emit('peer', { infoHash, peer });
+      }
     });
 
-    // 监听get_peers事件 - 参考原始dht-sniffer实现
+    // 监听get_peers事件 - 参考用户提供的代码
     this.dht.on('get_peers', (data: any) => {
-      this.peerManager.importPeer(data.peer);
-      this.emit('infoHash', { infoHash: data.infoHash, peer: data.peer });
+      // 增加对peer的address和port的检查
+      if (data && data.peer && data.peer.host && data.peer.port) {
+        this.peerManager.importPeer(data.peer);
+        this.emit('infoHash', { infoHash: data.infoHash, peer: data.peer });
+      }
     });
 
     // 监听错误事件
@@ -171,7 +193,41 @@ export class DHTManager extends BaseManager {
     });
 
     // 监听警告事件
-    this.dht.on('warning', (warning: string) => {
+    this.dht.on('warning', (warning: string | Error) => {
+      const warningMessage = warning instanceof Error ? warning.message : warning;
+
+      // 特殊处理已知的警告类型
+      if (warningMessage.includes('Unknown type: undefined')) {
+        // 记录但不传播这种常见的网络噪声
+        this.emit('debug', {
+          type: 'malformed_message',
+          message: warningMessage,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      if (warningMessage.includes('Unexpected transaction id:')) {
+        // 事务ID不匹配，可能是网络延迟或重复响应
+        this.emit('debug', {
+          type: 'transaction_id_mismatch',
+          message: warningMessage,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      if (warningMessage.includes('Out of order response')) {
+        // 响应顺序错误，UDP网络特性
+        this.emit('debug', {
+          type: 'out_of_order_response',
+          message: warningMessage,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      // 其他警告正常传播
       this.emit('warning', warning);
     });
   }
@@ -192,7 +248,7 @@ export class DHTManager extends BaseManager {
       const defaultPort = this.config.defaultPort || 6881;
       this.announce(defaultInfoHash, defaultPort);
     }, this.config.announcePeriod);
-    
+
     // 定期内存清理
     if (this.config.enableMemoryMonitoring) {
       this.memoryCleanupInterval = setInterval(() => {
@@ -214,7 +270,7 @@ export class DHTManager extends BaseManager {
       clearInterval(this.announceInterval);
       this.announceInterval = null;
     }
-    
+
     if (this.memoryCleanupInterval) {
       clearInterval(this.memoryCleanupInterval);
       this.memoryCleanupInterval = null;
@@ -229,10 +285,109 @@ export class DHTManager extends BaseManager {
 
     const operationKey = 'refreshNodes';
     this.executeWithRetry(async () => {
-      // dht类没有refresh方法，使用bootstrap来刷新网络连接
-      this.dht._bootstrap(true);
+      // 更新节点列表
+      let nodes = this.dht._rpc.nodes.toArray();
+      this.peerManager.updateNodes();
+
+      // 随机打乱节点顺序
+      const shuffledNodes = [...nodes];
+      shuffle(shuffledNodes);
+
+      // 获取配置参数
+      const refreshTime = this.config.refreshTime || 30000; // 默认30秒
+      const now = Date.now();
+
+      // 条件性执行findNode
+      if (now - (this.lastRefreshTime || 0) > refreshTime) {
+        shuffledNodes.forEach(node => {
+          const nodeKey = `${node.host}:${node.port}`;
+          const shouldCallFindNode = nodes.length < 5 ||
+            (!this.latestCalledPeers?.get(nodeKey) &&
+              nodes.length < 400 &&
+              Math.random() > (this.dht._rpc?.pending?.length || 0) / 12);
+
+          if (shouldCallFindNode) {
+            this.findNode(node, this.dht._rpc.id);
+            // 记录调用时间
+            if (!this.latestCalledPeers) {
+              this.latestCalledPeers = new Map();
+            }
+            this.latestCalledPeers.set(nodeKey, now);
+          }
+        });
+      }
+
+      // 节点数量过少时重新引导
+      if (nodes.length <= 3) {
+        this.dht._bootstrap(true);
+      }
+
+      // 处理RPC队列过长的情况
+      if (this.dht._rpc?.pending?.length > 1000) {
+        this.reduceRPCPending();
+      }
+
+      // 处理元数据等待队列
+      if (this.metadataWaitingQueues?.length > 100) {
+        shuffle(this.metadataWaitingQueues);
+      }
+
+      // 提升元数据获取效率
+      this.boostMetadataFetching();
+
+      // 导入有用的peers
+      this.importUsefulPeers();
+
+      // 更新最后刷新时间
+      this.lastRefreshTime = now;
+
       this.emit('refresh');
     }, operationKey);
+  }
+
+  /**
+   * 减少RPC待处理队列
+   */
+  private reduceRPCPending(): void {
+    if (!this.dht?._rpc?.pending) return;
+
+    const pending = this.dht._rpc.pending;
+    // 移除过期的待处理请求
+    const now = Date.now();
+    const timeoutThreshold = 30000; // 30秒超时
+
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const request = pending[i];
+      if (request.timestamp && (now - request.timestamp) > timeoutThreshold) {
+        pending.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * 提升元数据获取效率
+   */
+  private boostMetadataFetching(): void {
+    if (!this.metadataManager) return;
+
+    try {
+      this.metadataManager.boostMetadataFetching();
+    } catch (error) {
+      this.handleError('boostMetadataFetching', error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * 导入有用的peers
+   */
+  private importUsefulPeers(): void {
+    if (!this.peerManager) return;
+
+    try {
+      this.peerManager.importUsefulPeers();
+    } catch (error) {
+      this.handleError('importUsefulPeers', error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**
@@ -245,7 +400,7 @@ export class DHTManager extends BaseManager {
       if (callback) callback(error);
       return;
     }
-    
+
     this.executeWithRetry(
       async () => {
         this.dht!.announce(infoHash, port, (err: Error | null) => {
@@ -395,6 +550,12 @@ export class DHTManager extends BaseManager {
    */
   importPeers(peers: any[]): void {
     this.peerManager.importPeers(peers);
+  }
+  /**
+   * 导入peer
+   */
+  importPeer(peer: any): void {
+    this.peerManager.importPeer(peer);
   }
 
   /**
@@ -550,7 +711,7 @@ export class DHTManager extends BaseManager {
       // 验证和转换参数类型
       const validatedPort = typeof port === 'number' && port > 0 && port <= 65535 ? port : undefined;
       const validatedAddress = typeof address === 'string' && address.trim() !== '' ? address.trim() : undefined;
-      
+
       if (validatedPort && validatedAddress && callback) {
         this.dht.listen(validatedPort, validatedAddress, callback);
       } else if (validatedPort && callback) {
@@ -563,18 +724,18 @@ export class DHTManager extends BaseManager {
       this.emit('listening');
     }, 'listen', { port, address });
   }
-  
 
-  
+
+
   /**
    * 执行内存清理
    */
   public performMemoryCleanup(): void {
     if (!this.config.enableMemoryMonitoring) return;
-    
+
     const memoryUsage = process.memoryUsage();
     const threshold = this.config.memoryThreshold || 100 * 1024 * 1024;
-    
+
     // 检查内存使用情况
     if (memoryUsage.heapUsed > threshold) {
       this.emit('memoryWarning', {
@@ -584,14 +745,14 @@ export class DHTManager extends BaseManager {
         rss: memoryUsage.rss,
         threshold
       });
-      
+
       // 执行清理操作
       this.cleanupMemory();
       // 使用BaseManager的通用内存清理功能
       super.performMemoryCleanup();
     }
   }
-  
+
   /**
    * 清理内存
    */
@@ -600,13 +761,13 @@ export class DHTManager extends BaseManager {
     if (this.peerManager && typeof this.peerManager.cleanupOldNodes === 'function') {
       this.peerManager.cleanupOldNodes();
     }
-    
+
     // 清理DHT中的过期节点
     if (this.dht && this.dht._rpc && this.dht._rpc.nodes) {
       const nodes = this.dht._rpc.nodes;
       const now = Date.now();
       const maxAge = 30 * 60 * 1000; // 30分钟
-      
+
       // 清理长时间未响应的节点
       for (const [nodeId, node] of nodes.entries()) {
         if (node.lastSeen && (now - node.lastSeen) > maxAge) {
@@ -614,13 +775,13 @@ export class DHTManager extends BaseManager {
         }
       }
     }
-    
+
     // 清理pending calls
     if (this.dht && this.dht._rpc && this.dht._rpc.pending) {
       const pending = this.dht._rpc.pending;
       const now = Date.now();
       const maxPendingTime = 60 * 1000; // 1分钟
-      
+
       for (let i = pending.length - 1; i >= 0; i--) {
         const call = pending[i];
         if (call.timestamp && (now - call.timestamp) > maxPendingTime) {
@@ -628,22 +789,22 @@ export class DHTManager extends BaseManager {
         }
       }
     }
-    
+
     // 强制垃圾回收（如果可用）
     if (global.gc) {
       global.gc();
     }
-    
+
     this.emit('memoryCleaned');
   }
-  
+
   /**
    * 获取内存使用统计
    */
   getMemoryStats(): any {
     const memoryUsage = process.memoryUsage();
     const threshold = this.config.memoryThreshold || 100 * 1024 * 1024;
-    
+
     return {
       heapUsed: memoryUsage.heapUsed,
       heapTotal: memoryUsage.heapTotal,
@@ -654,7 +815,7 @@ export class DHTManager extends BaseManager {
       isMemoryWarning: memoryUsage.heapUsed > threshold
     };
   }
-  
+
   /**
    * 获取管理器名称
    */
@@ -694,7 +855,7 @@ export class DHTManager extends BaseManager {
       `DHT operation failed: ${operation}`,
       { operation, ...context, cause: error instanceof Error ? error : new Error(String(error)) }
     );
-    
+
     super.handleError(operation, networkError, context);
   }
 

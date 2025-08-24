@@ -556,6 +556,7 @@ class DHT extends EventEmitter {
         const infoHash = query.a.info_hash
         if (!infoHash) return this._rpc.error(peer, query, [203, '`get_peers` missing required `a.info_hash` field'])
 
+        console.log("get_peers", infoHash, peer)
         // avoid memory leaks
         this.emit('get_peers', { infoHash: Buffer.from(infoHash), peer: { host, port: peer.port } });
 

@@ -174,7 +174,7 @@ async function startDHTSniffer() {
             }
         });
         sniffer.on('node', node => {
-            console.log('find node', node);
+            console.log('find node', node["host"] + ":" + node["port"]);
         });
         sniffer.on('warning', err => {
             console.error('WARNING:', err);
@@ -201,12 +201,14 @@ async function startDHTSniffer() {
             }
         })
         sniffer.on("metadataError", data => {
-            // console.error("fail", data["infoHash"], data["error"]);
+            console.error("fail", data["infoHash"], data["error"]);
         })
-
-        let usefulPeerDict = fs.existsSync("../useful-peers.json") ? require("../useful-peers.json") : {};
-
+        let userful_peers_path = path.join(__dirname, "../useful-peers.json");
+        console.log(fs.existsSync(userful_peers_path))
+        let usefulPeerDict = fs.existsSync(userful_peers_path) ? require(userful_peers_path) : {};
+        console.log(usefulPeerDict)
         for (let peer of Object.values(usefulPeerDict)) {
+            console.log("import peer", peer);
             sniffer.importPeer(peer);
         }
 
@@ -236,7 +238,7 @@ async function startDHTSniffer() {
                     Reflect.deleteProperty(usefulPeerDict, key);
                 }
             }
-            fs.writeFileSync(path.join(__dirname, "../useful-peers.json"), JSON.stringify(usefulPeerDict));
+            fs.writeFileSync(userful_peers_path, JSON.stringify(usefulPeerDict));
         }, 60 * 1000)
 
         setInterval(() => {
@@ -245,11 +247,11 @@ async function startDHTSniffer() {
         }, 60 * 1000)
 
         let tmp_fp = path.join(__dirname, "../tmp/arr")
-        
+
         // 优雅退出处理函数
         function gracefulShutdown(signal) {
             console.log(`\nReceived ${signal}. Shutting down gracefully...`);
-            
+
             try {
                 let arr = sniffer.exportWaitingQueue();
                 let json = JSON.stringify(arr);
@@ -257,13 +259,13 @@ async function startDHTSniffer() {
                     fs.writeFileSync(tmp_fp, json);
                     console.log(`Saved ${arr.length} items from waiting queue to ${tmp_fp}`);
                 }
-                
+
                 // 停止DHT嗅探器
                 if (sniffer && typeof sniffer.stop === 'function') {
                     sniffer.stop();
                     console.log('DHT sniffer stopped');
                 }
-                
+
                 console.log('Graceful shutdown completed');
             } catch (error) {
                 console.error('Error during graceful shutdown:', error);
@@ -271,17 +273,17 @@ async function startDHTSniffer() {
                 process.exit(0);
             }
         }
-        
+
         // 监听SIGINT (Ctrl+C)和SIGTERM信号
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-        
+
         // 监听未捕获的异常
         process.on('uncaughtException', (error) => {
             console.error('Uncaught Exception:', error);
             gracefulShutdown('uncaughtException');
         });
-        
+
         process.on('unhandledRejection', (reason, promise) => {
             console.error('Unhandled Rejection at:', promise, 'reason:', reason);
             gracefulShutdown('unhandledRejection');
