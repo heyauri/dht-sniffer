@@ -105,39 +105,6 @@ export interface ExtendedHandshakeMessage {
 }
 
 /**
- * 元数据请求消息接口
- */
-export interface MetadataRequestMessage {
-  type: 0;
-  piece: number;
-}
-
-/**
- * 元数据数据消息接口
- */
-export interface MetadataDataMessage {
-  type: 1;
-  piece: number;
-  totalSize?: number;
-}
-
-/**
- * 元数据拒绝消息接口
- */
-export interface MetadataRejectMessage {
-  type: 2;
-  piece: number;
-}
-
-/**
- * 扩展类型联合
- */
-export type ExtensionMessageType = 
-  | MetadataRequestMessage
-  | MetadataDataMessage
-  | MetadataRejectMessage;
-
-/**
  * 协议扩展配置接口
  */
 export interface ProtocolExtensionConfig {

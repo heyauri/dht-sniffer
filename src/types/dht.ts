@@ -25,9 +25,9 @@ export interface Node extends Peer {
 }
 
 /**
- * 基础DHT配置接口
+ * DHT选项接口
  */
-export interface BaseDHTConfig {
+export interface DHTOptions {
   port?: number;
   refreshTime?: number;
   downloadMaxTime?: number;
@@ -40,12 +40,6 @@ export interface BaseDHTConfig {
   aggressiveLevel?: number;
   enhanceBootstrap?: boolean;
   bootstrapNodes?: Node[];
-}
-
-/**
- * DHT选项接口
- */
-export interface DHTOptions extends BaseDHTConfig {
   maximumParallelFetchingTorrent?: number;
   maximumWaitingQueueSize?: number;
   bootstrap?: boolean | string[];
@@ -54,47 +48,6 @@ export interface DHTOptions extends BaseDHTConfig {
   maxPeers?: number;
   maxAge?: number;
   timeBucketOutdated?: number;
-}
-
-/**
- * DHT消息接口
- */
-export interface DHTMessage {
-  t: Buffer;
-  y: string;
-  q: string;
-  a: {
-    id: Buffer;
-    target: Buffer;
-  };
-}
-
-/**
- * DHT回复接口
- */
-export interface DHTReply {
-  r?: {
-    nodes?: Buffer;
-  };
-}
-
-/**
- * 启动事件接口
- */
-export interface StartEvent extends BaseDHTConfig {
-  startTime: number;
-  port: number;
-  refreshTime: number;
-  maximumParallelFetchingTorrent: number;
-  maximumWaitingQueueSize: number;
-  downloadMaxTime: number;
-  expandNodes: boolean;
-  ignoreFetched: boolean;
-  concurrency: number;
-  fetchedTupleSize: number;
-  fetchedInfoHashSize: number;
-  findNodeCacheSize: number;
-  aggressiveLevel: number;
 }
 
 /**

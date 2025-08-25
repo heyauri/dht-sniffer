@@ -57,17 +57,11 @@ export * from './utils';
 import {
   Peer,
   Node,
-  BaseDHTConfig,
-  DHTOptions,
-  DHTMessage,
-  DHTReply,
-  StartEvent
+  DHTOptions
 } from './dht';
 
 import {
-  Metadata,
-  MetadataWarning,
-  WaitingQueueItem
+  Metadata
 } from './metadata';
 
 
@@ -83,15 +77,8 @@ import {
 export {
   Peer,
   Node,
-  BaseDHTConfig,
   DHTOptions,
-  DHTMessage,
-  DHTReply,
-  StartEvent,
   Metadata,
-
-  MetadataWarning,
-  WaitingQueueItem,
   ErrorType,
   ErrorSeverity,
   AppError,
@@ -110,7 +97,7 @@ export {
 
 // 常用事件类型
 export interface DHTEvents {
-  start: (config: StartEvent) => void;
+  start: (config: DHTOptions) => void;
   node: (node: Node) => void;
   warning: (err: Error) => void;
   error: (err: Error) => void;

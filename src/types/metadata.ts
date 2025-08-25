@@ -72,25 +72,6 @@ export interface MetadataError {
 }
 
 /**
- * 元数据警告接口
- */
-export interface MetadataWarning {
-  type: 'metadataWarning';
-  err: Error | string;
-  infoHash?: Buffer;
-  peer?: Peer;
-}
-
-/**
- * 等待队列项接口
- */
-export interface WaitingQueueItem {
-  infoHash: Buffer;
-  peer: Peer;
-  infoHashStr: string;
-}
-
-/**
  * 元数据等待项接口
  */
 export interface MetadataWaitingItem {
