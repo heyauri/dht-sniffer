@@ -7,10 +7,6 @@ import { PeerManager } from './peer-manager';
 import { Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
 import { BaseManager, ManagerStats } from './base-manager';
 
-
-
-
-
 // 引导节点
 const bootstrapNodes: Node[] = [
   // BitTorrent官方节点
@@ -47,6 +43,12 @@ export class DHTManager extends BaseManager {
   private latestCalledPeers: Map<string, number> = new Map();
   private metadataWaitingQueues: any[] = [];
   private metadataManager: any; // 需要注入MetadataManager实例
+  
+  // findNode队列调度相关属性
+  private findNodeQueue: Array<{peer: any, nodeId?: Buffer, timestamp: number}> = [];
+  private isProcessingFindNodeQueue: boolean = false;
+  private lastFindNodeTime: number = 0;
+  private readonly findNodeInterval: number = 50; // 50ms间隔
 
   constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager) {
     super(config, errorHandler);
@@ -419,9 +421,62 @@ export class DHTManager extends BaseManager {
   }
 
   /**
-   * 查找节点 - 参考原始dht-sniffer实现
+   * 查找节点 - 参考原始dht-sniffer实现，添加队列调度机制
    */
   findNode(peer: any, nodeId?: Buffer): void {
+    if (!this.dht || !this.isDHTRunning()) return;
+
+    // 将请求加入队列
+    this.findNodeQueue.push({
+      peer,
+      nodeId,
+      timestamp: Date.now()
+    });
+
+    // 如果队列处理器未运行，启动它
+    if (!this.isProcessingFindNodeQueue) {
+      this.processFindNodeQueue();
+    }
+  }
+
+  /**
+   * 处理findNode队列
+   */
+  private processFindNodeQueue(): void {
+    if (this.isProcessingFindNodeQueue) return;
+    
+    this.isProcessingFindNodeQueue = true;
+    
+    const processNext = () => {
+      if (this.findNodeQueue.length === 0) {
+        this.isProcessingFindNodeQueue = false;
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceLastFindNode = now - this.lastFindNodeTime;
+      
+      // 检查是否达到间隔时间
+      if (timeSinceLastFindNode >= this.findNodeInterval) {
+        const request = this.findNodeQueue.shift(); // 先进先出
+        if (request) {
+          this.executeFindNodeRequest(request.peer, request.nodeId);
+          this.lastFindNodeTime = now;
+        }
+      }
+
+      // 继续处理下一个请求
+      setTimeout(processNext, Math.max(0, this.findNodeInterval - timeSinceLastFindNode));
+    };
+
+    // 开始处理
+    setTimeout(processNext, 0);
+  }
+
+  /**
+   * 执行单个findNode请求
+   */
+  private executeFindNodeRequest(peer: any, nodeId?: Buffer): void {
     if (!this.dht || !this.isDHTRunning()) return;
 
     try {
