@@ -3,6 +3,8 @@ const fs = require("fs");
 const path = require("path");
 // const heapdump = require("heapdump");
 
+const torrent_dir_path = "M:\\torrents"
+
 // 端口检测和自动选择功能
 async function findAvailablePort(startPort = 6881, maxAttempts = 100) {
     const net = require('net');
@@ -163,7 +165,7 @@ async function startDHTSniffer() {
             console.log(infos);
         })
         sniffer.on('infoHash', (peerInfo) => {
-            let tors_path = path.join(__dirname, "../tors/")
+            let tors_path = torrent_dir_path;
             console.log('get infoHash:', peerInfo.infoHash, peerInfo.peer);
             if (!fs.existsSync(tors_path)) {
                 fs.mkdirSync(tors_path);
@@ -184,13 +186,11 @@ async function startDHTSniffer() {
             console.error('ERROR STACK:', err.stack);
         });
 
-        let timestamp = Date.now();
-
         sniffer.on("metadata", (metadataInfo) => {
             console.log("success", metadataInfo.infoHash, metadataInfo.metadata);
             try {
                 if (metadataInfo.metadata && Buffer.isBuffer(metadataInfo.metadata)) {
-                    fs.writeFileSync(path.join(__dirname, "../tors/", `${metadataInfo.infoHash.toString("hex")}.torrent`), metadataInfo.metadata);
+                    fs.writeFileSync(path.join(torrent_dir_path, `${metadataInfo.infoHash.toString("hex")}.torrent`), metadataInfo.metadata);
                     // heapdump.writeSnapshot(path.join(__dirname, "../tmp/", timpstamp + '.heapsnapshot'));
                 } else {
                     console.warn(`Invalid metadata for infoHash ${metadataInfo.infoHash.toString("hex")}: metadata is ${metadataInfo.metadata === null ? 'null' : 'undefined'}`);

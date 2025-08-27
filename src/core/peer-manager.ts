@@ -1,6 +1,6 @@
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { ValidationError, ErrorType } from '../types/error';
-import { Peer, PeerManagerConfig } from '../types/dht';
+import { Peer, Node, PeerManagerConfig } from '../types/dht';
 import { getPeerKey } from '../utils/dht-utils';
 import { shuffle } from '../utils/array-utils';
 import { BaseManager, BaseManagerConfig, ManagerStats } from './base-manager';
@@ -49,7 +49,7 @@ export class PeerManager extends BaseManager {
       try {
         this.dht.addNode({ host: peer.host, port: peer.port });
         this.addNode(peer);
-        
+
         // 添加这行来同时更新peerCount
         this.cacheManager.addPeerToCache(peerKey, peer);
       } catch (error) {
@@ -85,7 +85,7 @@ export class PeerManager extends BaseManager {
   /**
    * 导出有用的peers
    */
-exportUsefulPeers(): Peer[] {
+  exportUsefulPeers(): Peer[] {
     const usefulPeers = this.cacheManager.getUsefulPeers();
     const peers: Peer[] = [];
     for (const [_key, value] of usefulPeers) {
@@ -155,7 +155,7 @@ exportUsefulPeers(): Peer[] {
   /**
    * 检查是否需要调用findNode
    */
-  shouldCallFindNode(node: Peer): boolean {
+  shouldCallFindNode(node: Node): boolean {
     const nodeKey = `${node.host}:${node.port}`;
     const findNodeCache = this.cacheManager.getFindNodeCache();
     const latestCalledPeers = this.cacheManager.getLatestCalledPeers();

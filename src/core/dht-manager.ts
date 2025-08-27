@@ -4,6 +4,7 @@ import { getNeighborId, isNodeId, parseNodes, shuffle } from '../utils';
 import { NetworkError } from '../types/error';
 import { ErrorHandlerImpl } from '../errors/error-handler';
 import { PeerManager } from './peer-manager';
+import { CacheManager } from './cache-manager';
 import { Node, DHTManagerConfig, DHTManagerExtendedConfig } from '../types/dht';
 import { BaseManager, ManagerStats } from './base-manager';
 
@@ -40,20 +41,20 @@ export class DHTManager extends BaseManager {
 
   // 新增属性用于refresh机制
   private lastRefreshTime: number = 0;
-  private latestCalledPeers: Map<string, number> = new Map();
   private metadataWaitingQueues: any[] = [];
   private metadataManager: any; // 需要注入MetadataManager实例
-  
+
   // findNode队列调度相关属性
-  private findNodeQueue: Array<{peer: any, nodeId?: Buffer, timestamp: number}> = [];
+  private findNodeQueue: Array<{ node: any, nodeId?: Buffer, timestamp: number }> = [];
   private isProcessingFindNodeQueue: boolean = false;
   private lastFindNodeTime: number = 0;
   private readonly findNodeInterval: number = 50; // 50ms间隔
 
-  constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager) {
+  constructor(config: DHTManagerConfig, errorHandler: ErrorHandlerImpl, peerManager: PeerManager, cacheManager: CacheManager) {
     super(config, errorHandler);
 
     this.peerManager = peerManager;
+    this.cacheManager = cacheManager;
 
     // 设置默认配置
     this.config = Object.assign({
@@ -67,6 +68,7 @@ export class DHTManager extends BaseManager {
     }, config);
 
     this.dht = null;
+    this._rpc = null;
     this.refreshInterval = null;
     this.announceInterval = null;
     this.memoryCleanupInterval = null;
@@ -94,6 +96,7 @@ export class DHTManager extends BaseManager {
       };
 
       this.dht = new DHT.DHT(dhtConfig);
+      this._rpc = this.dht._rpc;
 
       // 设置事件监听
       this.setupEventListeners();
@@ -158,7 +161,7 @@ export class DHTManager extends BaseManager {
         this.emit('node', node);
 
         let nodeKey = `${node.host}:${node.port}`;
-        if (!this.latestCalledPeers?.get(nodeKey) &&
+        if (!this.cacheManager.findNodeCache?.get(nodeKey) &&
           Math.random() > (this.dht._rpc?.pending?.length || 0) / 10 &&
           this.peerManager.getNodeCount() < 400) {
           this.findNode(node, node.id);
@@ -304,17 +307,12 @@ export class DHTManager extends BaseManager {
         shuffledNodes.forEach(node => {
           const nodeKey = `${node.host}:${node.port}`;
           const shouldCallFindNode = nodes.length < 5 ||
-            (!this.latestCalledPeers?.get(nodeKey) &&
+            (this.peerManager.shouldCallFindNode(node) &&
               nodes.length < 400 &&
               Math.random() > (this.dht._rpc?.pending?.length || 0) / 12);
 
           if (shouldCallFindNode) {
             this.findNode(node, this.dht._rpc.id);
-            // 记录调用时间
-            if (!this.latestCalledPeers) {
-              this.latestCalledPeers = new Map();
-            }
-            this.latestCalledPeers.set(nodeKey, now);
           }
         });
       }
@@ -423,12 +421,12 @@ export class DHTManager extends BaseManager {
   /**
    * 查找节点 - 参考原始dht-sniffer实现，添加队列调度机制
    */
-  findNode(peer: any, nodeId?: Buffer): void {
+  findNode(node: any, nodeId?: Buffer): void {
     if (!this.dht || !this.isDHTRunning()) return;
 
     // 将请求加入队列
     this.findNodeQueue.push({
-      peer,
+      node,
       nodeId,
       timestamp: Date.now()
     });
@@ -444,9 +442,9 @@ export class DHTManager extends BaseManager {
    */
   private processFindNodeQueue(): void {
     if (this.isProcessingFindNodeQueue) return;
-    
+
     this.isProcessingFindNodeQueue = true;
-    
+
     const processNext = () => {
       if (this.findNodeQueue.length === 0) {
         this.isProcessingFindNodeQueue = false;
@@ -455,12 +453,12 @@ export class DHTManager extends BaseManager {
 
       const now = Date.now();
       const timeSinceLastFindNode = now - this.lastFindNodeTime;
-      
+
       // 检查是否达到间隔时间
       if (timeSinceLastFindNode >= this.findNodeInterval) {
         const request = this.findNodeQueue.shift(); // 先进先出
         if (request) {
-          this.executeFindNodeRequest(request.peer, request.nodeId);
+          this.executeFindNodeRequest(request.node, request.nodeId);
           this.lastFindNodeTime = now;
         }
       }
@@ -476,10 +474,12 @@ export class DHTManager extends BaseManager {
   /**
    * 执行单个findNode请求
    */
-  private executeFindNodeRequest(peer: any, nodeId?: Buffer): void {
+  private executeFindNodeRequest(node: any, nodeId?: Buffer): void {
     if (!this.dht || !this.isDHTRunning()) return;
 
     try {
+      if (!this.peerManager.shouldCallFindNode(node)) return;
+      this.peerManager.markNodeAsCalled(node);
       // 获取或生成目标ID
       const target = nodeId !== undefined
         ? getNeighborId(nodeId, this.dht.nodeId)
@@ -497,11 +497,11 @@ export class DHTManager extends BaseManager {
       };
 
       // 发送查询
-      this.dht._rpc.query(peer, message, (err: any, reply: any) => {
+      this.dht._rpc.query(node, message, (err: any, reply: any) => {
         try {
-          if (peer && peer.id && this.dht._rpc.nodes.get(peer.id) && isNodeId(peer.id, 20)) {
+          if (node && node.id && this.dht._rpc.nodes.get(node.id) && isNodeId(node.id, 20)) {
             if (err && (err.code === 'EUNEXPECTEDNODE' || err.code === 'ETIMEDOUT')) {
-              this.dht._rpc.remove(peer.id);
+              this.dht._rpc.remove(node.id);
             }
           }
         } catch (e) {
@@ -518,11 +518,11 @@ export class DHTManager extends BaseManager {
         }
       });
 
-      this.emit('findNode', peer, target);
+      this.emit('findNode', node, target);
     } catch (error) {
       const networkError = new NetworkError(
         `Failed to find node: ${error instanceof Error ? error.message : String(error)}`,
-        { operation: 'dht_find_node', peer, cause: error instanceof Error ? error : new Error(String(error)) },
+        { operation: 'dht_find_node', node, cause: error instanceof Error ? error : new Error(String(error)) },
         true
       );
       this.handleError('findNode', networkError);

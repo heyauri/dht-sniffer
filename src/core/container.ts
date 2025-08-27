@@ -213,12 +213,13 @@ export function createDefaultContainer(config: any): DIContainer {
   container.register('dhtManager', () => {
     const errorHandler = container.get<ErrorHandlerImpl>('errorHandler');
     const peerManager = container.get<any>('peerManager');
+    const cacheManager = container.get<any>('cacheManager');
     const dhtConfig = config.dht || {};
     return new DHTManager({
       ...dhtConfig,
       enableErrorHandling: true,
       enableMemoryMonitoring: true
-    } as any, errorHandler, peerManager);
+    } as any, errorHandler, peerManager, cacheManager);
   }, true);
   
   return container;

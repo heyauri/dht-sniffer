@@ -34,7 +34,7 @@ export function fetch(target: MetadataFetchTarget, config: MetadataFetchConfig):
             // 'metadata' event will fire when the metadata arrives and is verified to be correct!
             wire.ut_metadata.on('metadata', (metadata: Buffer) => {
                 console.log("metadata", metadata);
-                resolve(metadata);
+                resolve(Buffer.from(metadata));
                 socket.end();
                 wire.destroy();
             });
