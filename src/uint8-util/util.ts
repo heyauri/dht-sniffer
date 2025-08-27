@@ -4,8 +4,8 @@
 * @license  MIT
 */
 export const alphabet = '0123456789abcdef'
-const encodeLookup: string[] = []
-const decodeLookup: number[] = []
+const encodeLookup = []
+const decodeLookup = []
 
 for (let i = 0; i < 256; i++) {
   encodeLookup[i] = alphabet[i >> 4 & 0xf] + alphabet[i & 0xf]
@@ -18,7 +18,7 @@ for (let i = 0; i < 256; i++) {
   }
 }
 
-export const arr2hex = (data: Uint8Array): string => {
+export const arr2hex = data => {
   const length = data.length
   let string = ''
   let i = 0
@@ -28,7 +28,7 @@ export const arr2hex = (data: Uint8Array): string => {
   return string
 }
 
-export const hex2arr = (str: string): Uint8Array => {
+export const hex2arr = str => {
   const sizeof = str.length >> 1
   const length = sizeof << 1
   const array = new Uint8Array(sizeof)
@@ -40,7 +40,7 @@ export const hex2arr = (str: string): Uint8Array => {
   return array
 }
 
-export const concat = (chunks: Uint8Array[], size = 0): Uint8Array => {
+export const concat = (chunks, size = 0) => {
   const length = chunks.length || 0
   if (!size) {
     let i = length
@@ -57,7 +57,7 @@ export const concat = (chunks: Uint8Array[], size = 0): Uint8Array => {
   return b
 }
 
-export const equal = (a: Uint8Array, b: Uint8Array): boolean => {
+export const equal = (a, b) => {
   if (a.length !== b.length) return false
   for (let i = a.length; i > -1; i -= 1) {
     if ((a[i] !== b[i])) return false
